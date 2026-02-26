@@ -136,22 +136,22 @@ func (r *Runner) assembleReviewDocument(taskContent string) (string, error) {
 
 	doc += "# Review Instructions\n\n"
 	doc += "You are reviewing an implementation of the above task. " +
-		"Please verify the implementation is correct, run any tests, " +
-		"and make corrections as needed. Focus on:\n\n" +
+		"Please verify the implementation is correct and make corrections as needed. Focus on:\n\n" +
 		"- Correctness of the implementation\n" +
-		"- Test coverage\n" +
 		"- Code quality and adherence to the rules above\n" +
-		"- Edge cases and error handling\n"
+		"- Edge cases and error handling\n\n"
 
-	// Add test/lint commands if configured.
-	if r.TaskRunner != nil {
-		if testCmd, ok := r.TaskRunner.Commands["test"]; ok {
-			doc += fmt.Sprintf("\nRun tests with: `%s`\n", testCmd)
-		}
-		if lintCmd, ok := r.TaskRunner.Commands["lint"]; ok {
-			doc += fmt.Sprintf("Run linter with: `%s`\n", lintCmd)
-		}
-	}
+	doc += "## Commit Message Validation\n\n"
+	doc += "Read the git log and verify that the commit message(s) accurately describe " +
+		"the changes made. Compare them against the task document above. " +
+		"If the commit messages are vague, misleading, or do not reflect the actual changes, " +
+		"amend the most recent commit with a corrected message.\n\n"
+
+	doc += "## Test Coverage Validation\n\n"
+	doc += "Carefully read the task document above and identify every feature, behavior, or change it describes. " +
+		"Verify that each item has corresponding test coverage. " +
+		"If any described feature or behavior lacks tests, add the missing tests. " +
+		"Every testable requirement in the task document must have at least one test.\n"
 
 	return doc, nil
 }

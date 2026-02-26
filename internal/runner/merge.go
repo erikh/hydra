@@ -64,6 +64,11 @@ func (r *Runner) Merge(taskName string) error {
 		return err
 	}
 
+	// Pre-merge verification: double-check commit messages, tests, and lint.
+	if err := r.preMergeChecks(task, taskRepo); err != nil {
+		return err
+	}
+
 	// Rebase task branch into main and push.
 	defaultBranch, err := r.rebaseAndPush(taskRepo, branch)
 	if err != nil {
@@ -211,6 +216,78 @@ func (r *Runner) invokeClaudeForRepo(repoDir, document string) error {
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
 	})
+}
+
+// preMergeChecks invokes Claude to verify commit messages, test coverage, and lint
+// before merging into the default branch.
+func (r *Runner) preMergeChecks(task *design.Task, taskRepo *repo.Repo) error {
+	content, _ := task.Content()
+	doc := r.assemblePreMergeDocument(content)
+
+	sign := taskRepo.HasSigningKey()
+	cmds := r.commandsMap()
+	doc += commitInstructions(sign, cmds)
+
+	beforeSHA, _ := taskRepo.LastCommitSHA()
+
+	if err := r.invokeClaudeForRepo(taskRepo.Dir, doc); err != nil {
+		return fmt.Errorf("pre-merge checks failed: %w", err)
+	}
+
+	// If Claude committed fixes, push the updated branch.
+	afterSHA, _ := taskRepo.LastCommitSHA()
+	if afterSHA != beforeSHA {
+		branch := task.BranchName()
+		if err := taskRepo.ForcePushWithLease(branch); err != nil {
+			return fmt.Errorf("pushing pre-merge fixes: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// assemblePreMergeDocument builds a document for pre-merge verification.
+func (r *Runner) assemblePreMergeDocument(taskContent string) string {
+	var b strings.Builder
+	b.WriteString("# Pre-Merge Verification\n\n")
+	b.WriteString("This branch is about to be merged into the default branch. " +
+		"Perform a final verification before merge.\n\n")
+
+	b.WriteString("## Task Document\n\n")
+	b.WriteString(taskContent)
+	b.WriteString("\n\n")
+
+	b.WriteString("## Checks to Perform\n\n")
+
+	b.WriteString("### 1. Commit Message Validation\n\n")
+	b.WriteString("Read the git log for this branch. Verify that the commit message(s) " +
+		"accurately describe the changes made according to the task document above. " +
+		"If any commit message is vague, misleading, or does not reflect the actual changes, " +
+		"amend the most recent commit with a corrected message.\n\n")
+
+	b.WriteString("### 2. Test Coverage\n\n")
+	b.WriteString("Verify that every feature, behavior, or change described in the task document " +
+		"has corresponding test coverage. If any requirement lacks tests, add the missing tests.\n\n")
+
+	b.WriteString("### 3. Lint\n\n")
+	if r.TaskRunner != nil {
+		if lintCmd, ok := r.TaskRunner.Commands["lint"]; ok {
+			b.WriteString(fmt.Sprintf("Run the linter: `%s`\n", lintCmd))
+			b.WriteString("Fix any lint issues found.\n\n")
+		}
+	}
+
+	b.WriteString("### 4. Tests\n\n")
+	if r.TaskRunner != nil {
+		if testCmd, ok := r.TaskRunner.Commands["test"]; ok {
+			b.WriteString(fmt.Sprintf("Run the test suite: `%s`\n", testCmd))
+			b.WriteString("Fix any test failures.\n\n")
+		}
+	}
+
+	b.WriteString("If everything passes and no changes are needed, do not create a commit.\n")
+
+	return b.String()
 }
 
 // rebaseAndPush checks out the default branch, rebases the task branch into it, and pushes.
