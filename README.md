@@ -249,11 +249,20 @@ api_type: github
 # Gitea instance URL (only needed for Gitea when URL can't be parsed)
 gitea_url: https://gitea.example.com
 
-# Commands that Claude runs before committing
+# Commands that Claude runs before committing.
+#
+# IMPORTANT: These commands may run concurrently across multiple hydra tasks,
+# each in its own work directory (cloned repo). Make sure your test and lint
+# commands are safe to run in parallel without trampling each other. Avoid
+# commands that write to shared global state, fixed file paths outside the
+# work directory, or shared network ports. Each invocation should be fully
+# isolated to its own working tree.
 commands:
   test: "go test ./... -count=1"
   lint: "golangci-lint run ./..."
 ```
+
+**Concurrency safety:** Hydra runs each task in its own cloned work directory under `work/`. Multiple tasks can run concurrently, so your test and lint commands must be safe to execute in parallel. Avoid hardcoded ports, shared temp directories, global lock files, or anything else that would collide when two instances run at the same time. Each command should operate entirely within the current working tree.
 
 ## How Claude Commits
 

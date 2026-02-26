@@ -1250,6 +1250,9 @@ func TestVerificationSectionWithCommands(t *testing.T) {
 	if !strings.Contains(result, "golangci-lint run") {
 		t.Error("missing lint command")
 	}
+	if !strings.Contains(result, "concurrently") {
+		t.Error("missing concurrency safety note")
+	}
 }
 
 func TestVerificationSectionNilCommands(t *testing.T) {

@@ -58,7 +58,18 @@ func (d *Dir) Functional() (string, error) {
 }
 
 // DefaultHydraYml is the placeholder content for a new hydra.yml.
-const DefaultHydraYml = "commands:\n  # lint: \"golangci-lint run ./...\"\n  # test: \"go test ./... -count=1\"\n"
+const DefaultHydraYml = `# Commands that Claude runs before committing.
+#
+# IMPORTANT: These commands may run concurrently across multiple hydra tasks,
+# each in its own work directory (cloned repo). Make sure your test and lint
+# commands are safe to run in parallel without trampling each other. Avoid
+# commands that write to shared global state, fixed file paths outside the
+# work directory, or shared network ports. Each invocation should be fully
+# isolated to its own working tree.
+commands:
+  # lint: "golangci-lint run ./..."
+  # test: "go test ./... -count=1"
+`
 
 // EnsureHydraYml creates hydra.yml with placeholder content if it does not exist.
 func EnsureHydraYml(path string) error {
@@ -99,7 +110,7 @@ func Scaffold(path string) error {
 		"rules.md":                            "",
 		"lint.md":                             "",
 		"functional.md":                       "",
-		"hydra.yml":                           "commands:\n  # lint: \"golangci-lint run ./...\"\n  # test: \"go test ./... -count=1\"\n",
+		"hydra.yml":                           DefaultHydraYml,
 		filepath.Join("state", "record.json"): "[]\n",
 	}
 

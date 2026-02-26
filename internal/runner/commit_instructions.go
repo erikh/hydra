@@ -29,6 +29,10 @@ func verificationSection(commands map[string]string) string {
 	}
 
 	b.WriteString("\nFix any issues before proceeding to commit.\n")
+	b.WriteString("\nIMPORTANT: Multiple hydra tasks may run concurrently, each in its own " +
+		"work directory. Do not modify these commands to use fixed ports, shared temp files, " +
+		"or any global state that would conflict with parallel runs. " +
+		"All test and lint operations must be fully isolated to the current working tree.\n")
 	return b.String()
 }
 
