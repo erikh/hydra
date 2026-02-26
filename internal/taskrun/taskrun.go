@@ -70,6 +70,14 @@ func (c *Commands) resolveCommand(name, workDir string) (string, bool) {
 	return "", false
 }
 
+// userShell returns the user's shell from $SHELL, defaulting to /bin/sh.
+func userShell() string {
+	if sh := os.Getenv("SHELL"); sh != "" {
+		return sh
+	}
+	return "/bin/sh"
+}
+
 // RunDev executes the named "dev" command in the given working directory.
 // The command runs until it exits or the context is cancelled.
 // Falls back to "make dev" if no dev command is configured but a Makefile
@@ -80,12 +88,11 @@ func (c *Commands) RunDev(ctx context.Context, workDir string) error {
 		return errors.New("no dev command configured in hydra.yml and no dev target in Makefile")
 	}
 
-	parts := strings.Fields(cmdStr)
-	if len(parts) == 0 {
+	if strings.TrimSpace(cmdStr) == "" {
 		return errors.New("dev command is empty in hydra.yml")
 	}
 
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...) //nolint:gosec // commands from trusted config
+	cmd := exec.CommandContext(ctx, userShell(), "-c", cmdStr) //nolint:gosec // commands from trusted config
 	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -123,20 +130,21 @@ func (c *Commands) HasCommand(name, workDir string) bool {
 }
 
 // Run executes the named command in the given working directory.
-// Falls back to "make <name>" if the command is not configured in hydra.yml
-// but a Makefile with that target exists. Returns nil if neither is available.
+// The command is run via $SHELL -c, so shell features like pipes and
+// variable expansion work. Falls back to "make <name>" if the command
+// is not configured in hydra.yml but a Makefile with that target exists.
+// Returns nil if neither is available.
 func (c *Commands) Run(name, workDir string) error {
 	cmdStr, ok := c.resolveCommand(name, workDir)
 	if !ok {
 		return nil
 	}
 
-	parts := strings.Fields(cmdStr)
-	if len(parts) == 0 {
+	if strings.TrimSpace(cmdStr) == "" {
 		return nil
 	}
 
-	cmd := exec.CommandContext(context.Background(), parts[0], parts[1:]...) //nolint:gosec // commands from trusted config
+	cmd := exec.CommandContext(context.Background(), userShell(), "-c", cmdStr) //nolint:gosec // commands from trusted config
 	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -231,6 +231,8 @@ hydra other rm <name>      # Remove a file
 
 Imports open issues from GitHub or Gitea as task files under `tasks/issues/`. Existing issues (matched by number) are skipped. The API type is auto-detected from the source repo URL or can be set via `api_type` in `hydra.yml`.
 
+After importing, sync cleans up finished tasks: remote branches for completed and abandoned tasks are deleted, and associated issues are closed with a thank-you comment that includes the merge commit SHA.
+
 **Flags:** `--label` — Filter issues by label (repeatable)
 
 **Auth:** Set `GITHUB_TOKEN` (GitHub) or `GITEA_TOKEN` (Gitea) for private repos.
@@ -291,6 +293,8 @@ commands:
 - **`dev`** — Run by `hydra review dev`. Starts a long-lived process (dev server, file watcher, etc.) in the task's work directory. Not run by Claude.
 - **`test`** — Run by Claude before committing. Executes the project's test suite.
 - **`lint`** — Run by Claude before committing. Executes the project's linter.
+
+**Shell execution:** All commands are executed via `$SHELL -c "<command>"` with the task's work directory as the current working directory. This means shell features like pipes, variable expansion, and subshells work in command strings. If `$SHELL` is not set, `/bin/sh` is used as a fallback.
 
 **Makefile fallback:** If a command key is not configured in `hydra.yml`, hydra checks for a `Makefile` in the task's work directory. If a matching make target exists (e.g. `before:`, `clean:`, `test:`, `lint:`, `dev:`), hydra runs `make <name>` as a fallback. This means projects with a standard Makefile work out of the box without any `hydra.yml` configuration.
 
@@ -364,6 +368,27 @@ All fields are optional. Missing fields fall through to pywal (`~/.cache/wal/col
 1. `~/.hydra.yml`
 2. pywal
 3. Built-in defaults
+
+## Shell Completion
+
+Hydra supports tab completion for task names. All commands that accept a task name complete with the appropriate tasks for their state (e.g. `hydra run` completes pending tasks, `hydra review run` completes review tasks).
+
+**Bash:**
+
+```sh
+# Add to ~/.bashrc
+eval "$(hydra --generate-bash-completion 2>/dev/null)" || true
+# Or use the PROG-based approach:
+export PROG=hydra
+source <(hydra --generate-bash-completion)
+```
+
+**Zsh:**
+
+```sh
+# Add to ~/.zshrc
+eval "$(hydra --generate-bash-completion 2>/dev/null)" || true
+```
 
 ## Building & Releasing
 

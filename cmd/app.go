@@ -33,8 +33,9 @@ import (
 // NewApp creates the hydra CLI application.
 func NewApp() *cli.App {
 	return &cli.App{
-		Name:  "hydra",
-		Usage: "Local pull request workflow where Claude is the only contributor",
+		Name:                 "hydra",
+		Usage:                "Local pull request workflow where Claude is the only contributor",
+		EnableBashCompletion: true,
 		Description: "Hydra turns markdown design documents into branches, code, and commits. " +
 			"It assembles context from your design docs, hands it to Claude, runs tests and " +
 			"linting, and pushes a branch ready for your review.",
@@ -120,9 +121,10 @@ func initCommand() *cli.Command {
 
 func editCommand() *cli.Command {
 	return &cli.Command{
-		Name:      "edit",
-		Usage:     "Create or edit a task in the design directory",
-		ArgsUsage: "<task-name>",
+		Name:         "edit",
+		Usage:        "Create or edit a task in the design directory",
+		ArgsUsage:    "<task-name>",
+		BashComplete: completeTasks(design.StatePending),
 		Description: "Opens your editor to create or edit a task file. If the task already " +
 			"exists, opens it in-place. The editor is resolved from $VISUAL, then $EDITOR. " +
 			"The task name must not contain '/'.",
@@ -278,9 +280,10 @@ func otherCommand() *cli.Command {
 
 func runCommand() *cli.Command {
 	return &cli.Command{
-		Name:      "run",
-		Usage:     "Execute a design task",
-		ArgsUsage: "<task-name>",
+		Name:         "run",
+		Usage:        "Execute a design task",
+		ArgsUsage:    "<task-name>",
+		BashComplete: completeTasks(design.StatePending),
 		Description: "Executes the full task lifecycle: acquires a lock, creates a git branch, " +
 			"assembles the design document, invokes Claude via the Anthropic API with an " +
 			"interactive TUI, runs tests and linter, commits, pushes, records the commit SHA, " +
@@ -335,9 +338,10 @@ func runCommand() *cli.Command {
 
 func runGroupCommand() *cli.Command {
 	return &cli.Command{
-		Name:      "run-group",
-		Usage:     "Execute all pending tasks in a group sequentially",
-		ArgsUsage: "<group-name>",
+		Name:         "run-group",
+		Usage:        "Execute all pending tasks in a group sequentially",
+		ArgsUsage:    "<group-name>",
+		BashComplete: completeGroups,
 		Description: "Runs all pending tasks in the named group in alphabetical order. " +
 			"Between tasks, the base branch is restored so each task starts from a clean state. " +
 			"Stops immediately on the first error.",
@@ -641,6 +645,26 @@ func syncCommand() *cli.Command {
 			}
 
 			fmt.Printf("Synced issues: %d created, %d skipped\n", created, skipped)
+
+			// Clean up finished tasks: delete remote branches and close issues.
+			dd, err := design.NewDir(cfg.DesignDir)
+			if err != nil {
+				return err
+			}
+
+			sourceRepo := repo.Open(cfg.RepoDir)
+			closer := issues.ResolveCloser(source)
+
+			cleanup, err := issues.Cleanup(dd, sourceRepo, closer)
+			if err != nil {
+				return fmt.Errorf("cleanup: %w", err)
+			}
+
+			if cleanup.BranchesDeleted > 0 || cleanup.IssuesClosed > 0 {
+				fmt.Printf("Cleanup: %d branches deleted, %d issues closed\n",
+					cleanup.BranchesDeleted, cleanup.IssuesClosed)
+			}
+
 			return nil
 		},
 	}
@@ -657,7 +681,8 @@ type stateOps struct {
 
 // stateCommand builds a CLI command with list/view/edit/rm/run subcommands
 // for a given task state (review, merge, etc.).
-func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.Command {
+func stateCommand(name, usage, description, runUsage string, states []design.TaskState, ops stateOps) *cli.Command {
+	complete := completeTasks(states...)
 	return &cli.Command{
 		Name:        name,
 		Usage:       usage,
@@ -675,9 +700,10 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 				},
 			},
 			{
-				Name:      "view",
-				Usage:     "Print task content from " + name + " state",
-				ArgsUsage: "<task-name>",
+				Name:         "view",
+				Usage:        "Print task content from " + name + " state",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
 						return fmt.Errorf("usage: hydra %s view <task-name>", name)
@@ -690,9 +716,10 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 				},
 			},
 			{
-				Name:      "edit",
-				Usage:     "Open a task in " + name + " state in the editor",
-				ArgsUsage: "<task-name>",
+				Name:         "edit",
+				Usage:        "Open a task in " + name + " state in the editor",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
 						return fmt.Errorf("usage: hydra %s edit <task-name>", name)
@@ -709,9 +736,10 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 				},
 			},
 			{
-				Name:      "rm",
-				Usage:     "Move a task from " + name + " to abandoned",
-				ArgsUsage: "<task-name>",
+				Name:         "rm",
+				Usage:        "Move a task from " + name + " to abandoned",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
 						return fmt.Errorf("usage: hydra %s rm <task-name>", name)
@@ -724,9 +752,10 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 				},
 			},
 			{
-				Name:      "run",
-				Usage:     runUsage,
-				ArgsUsage: "<task-name>",
+				Name:         "run",
+				Usage:        runUsage,
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name:    "no-auto-accept",
@@ -779,6 +808,7 @@ func newRunner() (*runner.Runner, error) {
 }
 
 func reviewCommand() *cli.Command {
+	complete := completeTasks(design.StateReview)
 	return &cli.Command{
 		Name:        "review",
 		Usage:       "Manage and run review sessions on completed tasks",
@@ -796,9 +826,10 @@ func reviewCommand() *cli.Command {
 				},
 			},
 			{
-				Name:      "view",
-				Usage:     "Print task content from review state",
-				ArgsUsage: "<task-name>",
+				Name:         "view",
+				Usage:        "Print task content from review state",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
 						return errors.New("usage: hydra review view <task-name>")
@@ -811,9 +842,10 @@ func reviewCommand() *cli.Command {
 				},
 			},
 			{
-				Name:      "edit",
-				Usage:     "Open a task in review state in the editor",
-				ArgsUsage: "<task-name>",
+				Name:         "edit",
+				Usage:        "Open a task in review state in the editor",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
 						return errors.New("usage: hydra review edit <task-name>")
@@ -830,9 +862,10 @@ func reviewCommand() *cli.Command {
 				},
 			},
 			{
-				Name:      "rm",
-				Usage:     "Move a task from review to abandoned",
-				ArgsUsage: "<task-name>",
+				Name:         "rm",
+				Usage:        "Move a task from review to abandoned",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
 						return errors.New("usage: hydra review rm <task-name>")
@@ -845,9 +878,10 @@ func reviewCommand() *cli.Command {
 				},
 			},
 			{
-				Name:      "run",
-				Usage:     "Run an interactive review session",
-				ArgsUsage: "<task-name>",
+				Name:         "run",
+				Usage:        "Run an interactive review session",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name:    "no-auto-accept",
@@ -887,9 +921,10 @@ func reviewCommand() *cli.Command {
 				},
 			},
 			{
-				Name:      "dev",
-				Usage:     "Run the dev command from hydra.yml in the task's work directory",
-				ArgsUsage: "<task-name>",
+				Name:         "dev",
+				Usage:        "Run the dev command from hydra.yml in the task's work directory",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
 						return errors.New("usage: hydra review dev <task-name>")
@@ -912,9 +947,10 @@ func reviewCommand() *cli.Command {
 
 func testCommand() *cli.Command {
 	return &cli.Command{
-		Name:      "test",
-		Usage:     "Add tests for a task in review state",
-		ArgsUsage: "<task-name>",
+		Name:         "test",
+		Usage:        "Add tests for a task in review state",
+		ArgsUsage:    "<task-name>",
+		BashComplete: completeTasks(design.StateReview),
 		Description: "Opens a Claude session that reads the task description, adds missing tests, " +
 			"runs test and lint commands from hydra.yml, and fixes any issues. " +
 			"The task stays in review state after the session.",
@@ -963,9 +999,10 @@ func testCommand() *cli.Command {
 
 func cleanCommand() *cli.Command {
 	return &cli.Command{
-		Name:      "clean",
-		Usage:     "Run the clean command from hydra.yml in a task's work directory",
-		ArgsUsage: "<task-name>",
+		Name:         "clean",
+		Usage:        "Run the clean command from hydra.yml in a task's work directory",
+		ArgsUsage:    "<task-name>",
+		BashComplete: completeAllTasks,
 		Description: "Runs the clean command defined in hydra.yml in the task's work directory, " +
 			"regardless of which state the task is in.",
 		Action: func(c *cli.Context) error {
@@ -989,6 +1026,7 @@ func mergeCommand() *cli.Command {
 		"Manage and run merge workflows on reviewed tasks",
 		"CRUD operations and merge workflow for tasks in review or merge state.",
 		"Run the merge workflow (rebase, test, merge, push)",
+		[]design.TaskState{design.StateReview, design.StateMerge},
 		stateOps{
 			list: (*runner.Runner).MergeList,
 			view: (*runner.Runner).MergeView,
