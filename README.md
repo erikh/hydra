@@ -98,10 +98,13 @@ hydra sync
 # Run a task — Claude implements, tests, lints, and commits; branch pushed
 hydra run issues/42-fix-bug
 
-# Review the implementation — Claude checks its own work
+# Add tests — Claude reads the task, adds missing tests, runs test/lint
+hydra test 42-fix-bug
+
+# Review the implementation — Claude validates commit messages and test coverage
 hydra review run 42-fix-bug
 
-# Merge — rebase onto main, run tests, rebase into main, push, close issue
+# Merge — pre-merge verification, rebase onto main, push, close issue
 hydra merge run 42-fix-bug
 ```
 
@@ -157,9 +160,27 @@ hydra review rm <task-name>        # Move task to abandoned
 hydra review run <task-name>       # Run interactive review session
 ```
 
-`hydra review run` opens a Claude session where Claude reviews the implementation, runs tests, and makes corrections. If Claude commits changes, they are pushed automatically. The task stays in review state after the session.
+`hydra review run` opens a Claude session where Claude reviews the implementation and validates:
+
+- **Commit messages** — reads the git log and verifies commit messages accurately describe the changes per the task document; amends if needed
+- **Test coverage** — identifies every feature described in the task document and verifies each has test coverage; adds missing tests
+
+If Claude commits changes, they are pushed automatically. The task stays in review state after the session.
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+
+### `hydra test <task-name>`
+
+Runs a test-focused Claude session on a task in review state. Claude reads the task description and existing implementation, then:
+
+1. Identifies every feature, behavior, and edge case described in the task document
+2. Checks which features already have test coverage
+3. Adds tests for any features or behaviors that lack coverage
+4. Runs test and lint commands from `hydra.yml` and fixes any issues
+
+If Claude commits changes, they are pushed automatically. The task stays in review state.
+
+**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
 ### `hydra merge`
 
@@ -173,7 +194,12 @@ hydra merge rm <task-name>         # Move task to abandoned
 hydra merge run <task-name>        # Run merge workflow
 ```
 
-`hydra merge run` performs: rebase onto `origin/main`, resolve conflicts via Claude if needed, run tests/lint, fix failures via Claude if needed, rebase task branch into main, push, record SHA, move to completed, and close the remote issue if applicable.
+`hydra merge run` performs:
+
+1. Rebase onto `origin/main`, resolve conflicts via Claude if needed
+2. Run tests/lint, fix failures via Claude if needed
+3. **Pre-merge verification** — Claude double-checks commit messages against the task document, verifies test coverage, runs lint and tests, and fixes any issues
+4. Rebase task branch into main, push, record SHA, move to completed, and close the remote issue if applicable
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
@@ -210,6 +236,8 @@ Shows tasks grouped by state (pending, review, merge, completed, abandoned) and 
 Lists milestone targets and historical scores with letter grades (A-F).
 
 ## hydra.yml
+
+If `hydra.yml` does not exist in the design directory, it is automatically created with commented-out placeholder commands. This happens during `hydra init` and whenever a runner command is executed.
 
 ```yaml
 # Model to use for Claude API calls (default: claude-opus-4-6)

@@ -63,18 +63,13 @@ func New(cfg *config.Config) (*Runner, error) {
 	return r, nil
 }
 
-// defaultHydraYml is the placeholder content for a new hydra.yml.
-const defaultHydraYml = "commands:\n  # lint: \"golangci-lint run ./...\"\n  # test: \"go test ./... -count=1\"\n"
-
 // loadHydraYml loads hydra.yml and resolves issue closer.
 // If the file does not exist, it is created with placeholder content.
 func (r *Runner) loadHydraYml(cfg *config.Config) error {
-	ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
-	if !fileExists(ymlPath) {
-		if err := os.WriteFile(ymlPath, []byte(defaultHydraYml), 0o600); err != nil {
-			return fmt.Errorf("creating hydra.yml: %w", err)
-		}
+	if err := design.EnsureHydraYml(cfg.DesignDir); err != nil {
+		return fmt.Errorf("ensuring hydra.yml: %w", err)
 	}
+	ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
 
 	cmds, err := taskrun.Load(ymlPath)
 	if err != nil {
@@ -87,11 +82,6 @@ func (r *Runner) loadHydraYml(cfg *config.Config) error {
 
 	r.resolveIssueCloser(cfg.SourceRepoURL, cmds.APIType, cmds.GiteaURL)
 	return nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // resolveIssueCloser attempts to set the issue closer from the source URL.
@@ -218,9 +208,10 @@ func (r *Runner) Run(taskName string) error {
 		return fmt.Errorf("assembling document: %w", err)
 	}
 
-	// Append commit instructions so Claude handles test/lint/commit.
+	// Append verification and commit instructions so Claude handles test/lint/commit.
 	sign := taskRepo.HasSigningKey()
 	cmds := r.commandsMap()
+	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 
 	// Capture HEAD before invoking Claude.

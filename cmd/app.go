@@ -33,6 +33,7 @@ func NewApp() *cli.App {
 			editCommand(),
 			otherCommand(),
 			reviewCommand(),
+			testCommand(),
 			mergeCommand(),
 			statusCommand(),
 			listCommand(),
@@ -690,6 +691,57 @@ func reviewCommand() *cli.Command {
 			run:  (*runner.Runner).Review,
 		},
 	)
+}
+
+func testCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "test",
+		Usage:     "Add tests for a task in review state",
+		ArgsUsage: "<task-name>",
+		Description: "Opens a Claude session that reads the task description, adds missing tests, " +
+			"runs test and lint commands from hydra.yml, and fixes any issues. " +
+			"The task stays in review state after the session.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "no-auto-accept",
+				Aliases: []string{"Y"},
+				Usage:   "Disable auto-accept (prompt for each tool call)",
+			},
+			&cli.BoolFlag{
+				Name:    "no-plan",
+				Aliases: []string{"P"},
+				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "Override the Claude model",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			if c.NArg() != 1 {
+				return errors.New("usage: hydra test <task-name>")
+			}
+
+			r, err := newRunner()
+			if err != nil {
+				return err
+			}
+
+			r.AutoAccept = true
+			r.PlanMode = true
+			if c.Bool("no-auto-accept") {
+				r.AutoAccept = false
+			}
+			if c.Bool("no-plan") {
+				r.PlanMode = false
+			}
+			if m := c.String("model"); m != "" {
+				r.Model = m
+			}
+
+			return r.Test(c.Args().Get(0))
+		},
+	}
 }
 
 func mergeCommand() *cli.Command {

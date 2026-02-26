@@ -62,9 +62,10 @@ func (r *Runner) Review(taskName string) error {
 		return fmt.Errorf("assembling review document: %w", err)
 	}
 
-	// Append commit instructions so Claude handles staging and committing.
+	// Append verification and commit instructions so Claude handles test/lint/staging/committing.
 	sign := taskRepo.HasSigningKey()
 	cmds := r.commandsMap()
+	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 
 	// Capture HEAD before invoking Claude.

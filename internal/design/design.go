@@ -57,12 +57,26 @@ func (d *Dir) Functional() (string, error) {
 	return d.readFile("functional.md")
 }
 
+// DefaultHydraYml is the placeholder content for a new hydra.yml.
+const DefaultHydraYml = "commands:\n  # lint: \"golangci-lint run ./...\"\n  # test: \"go test ./... -count=1\"\n"
+
+// EnsureHydraYml creates hydra.yml with placeholder content if it does not exist.
+func EnsureHydraYml(path string) error {
+	p := filepath.Join(path, "hydra.yml")
+	if _, err := os.Stat(p); err == nil {
+		return nil
+	}
+	return os.WriteFile(p, []byte(DefaultHydraYml), 0o600)
+}
+
 // Scaffold creates the full design directory skeleton tree at the given path.
-// If the directory already has content (e.g. rules.md exists), it skips scaffolding.
+// If the directory already has content (e.g. rules.md exists), it skips scaffolding
+// but still ensures hydra.yml exists.
 func Scaffold(path string) error {
 	// If rules.md already exists, assume the directory is already scaffolded.
+	// Still ensure hydra.yml exists.
 	if _, err := os.Stat(filepath.Join(path, "rules.md")); err == nil {
-		return nil
+		return EnsureHydraYml(path)
 	}
 
 	dirs := []string{

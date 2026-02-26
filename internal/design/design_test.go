@@ -109,9 +109,14 @@ func TestScaffoldSkipsExisting(t *testing.T) {
 		t.Errorf("rules.md = %q, want %q", string(data), "My custom rules.")
 	}
 
-	// Verify other scaffold files were NOT created (since we skipped).
-	if _, err := os.Stat(filepath.Join(dir, "hydra.yml")); !os.IsNotExist(err) {
-		t.Error("hydra.yml should not exist when scaffolding is skipped")
+	// hydra.yml should always be created, even when full scaffolding is skipped.
+	if _, err := os.Stat(filepath.Join(dir, "hydra.yml")); os.IsNotExist(err) {
+		t.Error("hydra.yml should always be created")
+	}
+
+	// But other scaffold directories should NOT be created.
+	if _, err := os.Stat(filepath.Join(dir, "tasks")); !os.IsNotExist(err) {
+		t.Error("tasks/ should not exist when scaffolding is skipped")
 	}
 }
 

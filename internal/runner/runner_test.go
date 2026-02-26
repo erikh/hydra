@@ -206,7 +206,10 @@ func TestRunFullWorkflow(t *testing.T) {
 	}
 
 	// Verify no uncommitted changes remain.
-	statusOut, _ := exec.CommandContext(context.Background(), "git", "-C", wd, "status", "--porcelain").Output() //nolint:gosec // test
+	statusOut, err := exec.CommandContext(context.Background(), "git", "-C", wd, "status", "--porcelain").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
 	if strings.TrimSpace(string(statusOut)) != "" {
 		t.Errorf("uncommitted changes remain: %s", statusOut)
 	}
@@ -224,7 +227,10 @@ func TestRunFullWorkflow(t *testing.T) {
 	}
 
 	// Verify push happened (branch exists on remote).
-	remoteOut, _ := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "branch").Output() //nolint:gosec // test
+	remoteOut, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "branch").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git branch: %v", err)
+	}
 	if !strings.Contains(string(remoteOut), "hydra/add-feature") {
 		t.Errorf("branch not pushed to remote, branches: %s", remoteOut)
 	}
@@ -277,7 +283,10 @@ func TestRunGroupedTask(t *testing.T) {
 
 	// Grouped tasks go in work/{group}/{name}.
 	wd := filepath.Join(env.BaseDir, "work", "backend", "add-api")
-	out, _ := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
+	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
 	branch := strings.TrimSpace(string(out))
 	if branch != "hydra/backend/add-api" {
 		t.Errorf("branch = %q, want hydra/backend/add-api", branch)
@@ -1226,6 +1235,92 @@ func TestCommitInstructionsNilCommands(t *testing.T) {
 	}
 }
 
+func TestVerificationSectionWithCommands(t *testing.T) {
+	result := verificationSection(map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	})
+
+	if !strings.Contains(result, "## Verification") {
+		t.Error("missing Verification header")
+	}
+	if !strings.Contains(result, "go test ./...") {
+		t.Error("missing test command")
+	}
+	if !strings.Contains(result, "golangci-lint run") {
+		t.Error("missing lint command")
+	}
+}
+
+func TestVerificationSectionNilCommands(t *testing.T) {
+	result := verificationSection(nil)
+	if result != "" {
+		t.Errorf("expected empty string for nil commands, got %q", result)
+	}
+}
+
+func TestVerificationSectionEmptyCommands(t *testing.T) {
+	result := verificationSection(map[string]string{})
+	if result != "" {
+		t.Errorf("expected empty string for empty commands, got %q", result)
+	}
+}
+
+func TestRunDocumentIncludesVerification(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(captured, "## Verification") {
+		t.Error("run document missing Verification section")
+	}
+	// Our test hydra.yml has test: "true" and lint: "true".
+	if !strings.Contains(captured, "Run tests:") {
+		t.Error("run document missing test command in verification")
+	}
+	if !strings.Contains(captured, "Run linter:") {
+		t.Error("run document missing lint command in verification")
+	}
+}
+
+func TestReviewDocumentIncludesVerification(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	if err := r.Review("add-feature"); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+
+	if !strings.Contains(captured, "## Verification") {
+		t.Error("review document missing Verification section")
+	}
+}
+
 func TestReviewDocumentIncludesValidation(t *testing.T) {
 	env := setupTestEnv(t)
 
@@ -1412,8 +1507,8 @@ func TestAutoCreateHydraYml(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading hydra.yml: %v", err)
 	}
-	if string(data) != defaultHydraYml {
-		t.Errorf("hydra.yml content = %q, want %q", string(data), defaultHydraYml)
+	if string(data) != design.DefaultHydraYml {
+		t.Errorf("hydra.yml content = %q, want %q", string(data), design.DefaultHydraYml)
 	}
 
 	// Verify runner still works (commands are commented out so TaskRunner has no active commands).
@@ -1422,5 +1517,191 @@ func TestAutoCreateHydraYml(t *testing.T) {
 
 	if err := r.Run("add-feature"); err != nil {
 		t.Fatalf("Run after auto-create: %v", err)
+	}
+}
+
+func TestTestWorkflow(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Run test session: Claude adds a test file and commits.
+	testFiles := []string{"feature_test.go", "feature_helper_test.go"}
+	callCount := 0
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		callCount++
+		for _, f := range testFiles {
+			if err := os.WriteFile(filepath.Join(cfg.RepoDir, f), []byte("package main\n// "+f), 0o600); err != nil {
+				return err
+			}
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+
+	if err := r.Test("add-feature"); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected 1 test call, got %d", callCount)
+	}
+
+	// Task should still be in review state.
+	dd, _ := design.NewDir(env.DesignDir)
+	task, err := dd.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Errorf("expected task in review state: %v", err)
+	}
+	if task == nil {
+		t.Fatal("task not found in review state")
+	}
+
+	// Verify the test files were actually written.
+	wd := workDirForTask(env.BaseDir)
+	for _, f := range testFiles {
+		if _, statErr := os.Stat(filepath.Join(wd, f)); statErr != nil {
+			t.Errorf("expected test file %s to exist: %v", f, statErr)
+		}
+	}
+}
+
+func TestTestNoChanges(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Test session with no changes.
+	r.Claude = mockClaudeNoChanges
+
+	if err := r.Test("add-feature"); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+
+	// Task should still be in review.
+	dd, _ := design.NewDir(env.DesignDir)
+	_, err = dd.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Error("task should still be in review after no-change test session")
+	}
+}
+
+func TestTestDocumentContents(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Capture the test document.
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	if err := r.Test("add-feature"); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+
+	// Verify document contains test instructions.
+	if !strings.Contains(captured, "# Test Instructions") {
+		t.Error("document missing Test Instructions section")
+	}
+	if !strings.Contains(captured, "Add the feature.") {
+		t.Error("document missing task content")
+	}
+	if !strings.Contains(captured, "test coverage") {
+		t.Error("document should mention test coverage")
+	}
+	if !strings.Contains(captured, "# Commit Instructions") {
+		t.Error("document missing commit instructions")
+	}
+}
+
+func TestTestPushesChanges(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Test session with changes.
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "new_test.go"), []byte("package main\n// test"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+
+	if err := r.Test("add-feature"); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+
+	// Verify pushed to remote.
+	wd := workDirForTask(env.BaseDir)
+	localSHA, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "HEAD").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git rev-parse local: %v", err)
+	}
+	remoteSHA, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "rev-parse", "hydra/add-feature").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git rev-parse remote: %v", err)
+	}
+
+	if strings.TrimSpace(string(localSHA)) != strings.TrimSpace(string(remoteSHA)) {
+		t.Error("test changes not pushed to remote")
+	}
+
+	// Verify record.json has the test entry.
+	recordPath := filepath.Join(env.DesignDir, "state", "record.json")
+	data, err := os.ReadFile(recordPath) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading record.json: %v", err)
+	}
+	var entries []map[string]string
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("parsing record.json: %v", err)
+	}
+	foundTest := false
+	for _, e := range entries {
+		if e["task_name"] == "test:add-feature" {
+			foundTest = true
+		}
+	}
+	if !foundTest {
+		t.Error("record.json missing test:add-feature entry")
 	}
 }

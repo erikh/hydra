@@ -2,6 +2,36 @@ package runner
 
 import "strings"
 
+// verificationSection returns a markdown section listing the test and lint
+// commands Claude should run before committing. Returns empty string if
+// no commands are configured.
+func verificationSection(commands map[string]string) string {
+	testCmd := commands["test"]
+	lintCmd := commands["lint"]
+
+	if testCmd == "" && lintCmd == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n## Verification\n\n")
+	b.WriteString("Before committing, ensure all checks pass:\n\n")
+
+	if testCmd != "" {
+		b.WriteString("- Run tests: `")
+		b.WriteString(testCmd)
+		b.WriteString("`\n")
+	}
+	if lintCmd != "" {
+		b.WriteString("- Run linter: `")
+		b.WriteString(lintCmd)
+		b.WriteString("`\n")
+	}
+
+	b.WriteString("\nFix any issues before proceeding to commit.\n")
+	return b.String()
+}
+
 // commitInstructions returns a markdown section instructing Claude to
 // run tests/lint, stage changes, and commit with a descriptive message.
 func commitInstructions(sign bool, commands map[string]string) string {
