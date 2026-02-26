@@ -250,11 +250,23 @@ func promptCompletionInstall() {
 			_ = writeCompletionStub(false)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Completion installed. Run: \"exec $SHELL\" or \"source %s\"\n", rcPath)
 		_ = writeCompletionStub(true)
+		fmt.Fprintf(os.Stderr, "Completion installed in %s.\n", rcPath)
+		activateCompletion(shell)
 	} else {
 		_ = writeCompletionStub(false)
 		fmt.Fprintf(os.Stderr, "Skipped. You can install later with: hydra completion install\n")
+	}
+}
+
+// activateCompletion prints the completion script to stdout so the calling
+// shell can eval it immediately (e.g. `eval "$(hydra completion install)"`).
+func activateCompletion(shell string) {
+	switch shell {
+	case "bash":
+		fmt.Print(bashCompletionScript)
+	case "zsh":
+		fmt.Print(zshCompletionScript)
 	}
 }
 
@@ -305,7 +317,8 @@ func completionCommand() *cli.Command {
 						return fmt.Errorf("injecting completion: %w", err)
 					}
 					_ = writeCompletionStub(true)
-					fmt.Fprintf(os.Stderr, "Completion installed in %s. Run: \"exec $SHELL\" or \"source %s\"\n", rcPath, rcPath)
+					fmt.Fprintf(os.Stderr, "Completion installed in %s.\n", rcPath)
+					activateCompletion(shell)
 					return nil
 				},
 			},
@@ -333,7 +346,7 @@ func completionCommand() *cli.Command {
 					if p != "" {
 						_ = os.Remove(p)
 					}
-					fmt.Fprintf(os.Stderr, "Completion removed from %s. Run: \"exec $SHELL\" or \"source %s\"\n", rcPath, rcPath)
+					fmt.Fprintf(os.Stderr, "Completion removed from %s.\n", rcPath)
 					return nil
 				},
 			},
