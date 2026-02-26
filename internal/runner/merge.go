@@ -179,14 +179,16 @@ func (r *Runner) fixTestFailures(task *design.Task, taskRepo *repo.Repo, testErr
 	// Capture HEAD before invoking Claude.
 	beforeSHA, _ := taskRepo.LastCommitSHA()
 
-	if err := r.invokeClaudeForRepo(taskRepo.Dir, doc); err != nil {
-		return fmt.Errorf("test fix failed: %w", err)
-	}
+	claudeErr := r.invokeClaudeForRepo(taskRepo.Dir, doc)
 
-	// Check if Claude committed.
+	// Check if Claude committed, even if Claude returned an error
+	// (e.g. terminated by signal after committing).
 	afterSHA, _ := taskRepo.LastCommitSHA()
 	if afterSHA != beforeSHA {
 		return nil
+	}
+	if claudeErr != nil {
+		return fmt.Errorf("test fix failed: %w", claudeErr)
 	}
 
 	// Fallback: if Claude didn't commit, commit any changes ourselves.
@@ -231,12 +233,14 @@ func (r *Runner) preMergeChecks(task *design.Task, taskRepo *repo.Repo) error {
 
 	beforeSHA, _ := taskRepo.LastCommitSHA()
 
-	if err := r.invokeClaudeForRepo(taskRepo.Dir, doc); err != nil {
-		return fmt.Errorf("pre-merge checks failed: %w", err)
-	}
+	claudeErr := r.invokeClaudeForRepo(taskRepo.Dir, doc)
 
-	// If Claude committed fixes, push the updated branch.
+	// If Claude committed fixes, push them even if Claude returned an error
+	// (e.g. terminated by signal after committing).
 	afterSHA, _ := taskRepo.LastCommitSHA()
+	if afterSHA == beforeSHA && claudeErr != nil {
+		return fmt.Errorf("pre-merge checks failed: %w", claudeErr)
+	}
 	if afterSHA != beforeSHA {
 		branch := task.BranchName()
 		if err := taskRepo.ForcePushWithLease(branch); err != nil {

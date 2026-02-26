@@ -81,14 +81,16 @@ func (r *Runner) Test(taskName string) error {
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
 	}
-	if err := claudeFn(context.Background(), runCfg); err != nil {
-		return err
-	}
+	claudeErr := claudeFn(context.Background(), runCfg)
 
-	// Check if Claude committed (HEAD moved).
+	// Check if Claude committed (HEAD moved), even if Claude returned an error
+	// (e.g. terminated by signal after committing).
 	afterSHA, _ := taskRepo.LastCommitSHA()
 
 	if afterSHA == beforeSHA {
+		if claudeErr != nil {
+			return claudeErr
+		}
 		fmt.Printf("Test session for %q: no changes made.\n", taskName)
 		return nil
 	}

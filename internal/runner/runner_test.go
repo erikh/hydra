@@ -403,6 +403,48 @@ func TestRunClaudeError(t *testing.T) {
 	}
 }
 
+func TestRunClaudeErrorAfterCommit(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Simulate Claude committing then returning an error (e.g. signal termination).
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "generated.go"), []byte("package main\n"), 0o600); err != nil {
+			return err
+		}
+		if err := mockCommit(cfg.RepoDir); err != nil {
+			return err
+		}
+		return errors.New("terminated by signal")
+	}
+	r.BaseDir = env.BaseDir
+
+	// Run should still succeed since Claude committed.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run should succeed when Claude committed before error: %v", err)
+	}
+
+	// Task should be in review state.
+	dd, _ := design.NewDir(env.DesignDir)
+	_, err = dd.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Error("task should be in review after Claude committed before error")
+	}
+
+	// Branch should be pushed to remote.
+	remoteOut, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "branch").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git branch: %v", err)
+	}
+	if !strings.Contains(string(remoteOut), "hydra/add-feature") {
+		t.Error("branch not pushed to remote after Claude committed before error")
+	}
+}
+
 func TestRunTaskNotFound(t *testing.T) {
 	env := setupTestEnv(t)
 
