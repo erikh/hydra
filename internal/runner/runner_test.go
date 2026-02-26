@@ -206,7 +206,7 @@ func TestRunFullWorkflow(t *testing.T) {
 	}
 
 	// Verify lock was released.
-	lockPath := filepath.Join(env.BaseDir, ".hydra", "hydra.lock")
+	lockPath := filepath.Join(env.BaseDir, ".hydra", "hydra-add-feature.lock")
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Error("lock file not released")
 	}
@@ -344,7 +344,7 @@ func TestRunNoChangesError(t *testing.T) {
 	}
 
 	// Lock should be released even on error.
-	lockPath := filepath.Join(env.BaseDir, ".hydra", "hydra.lock")
+	lockPath := filepath.Join(env.BaseDir, ".hydra", "hydra-add-feature.lock")
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Error("lock file not released after error")
 	}
@@ -393,8 +393,8 @@ func TestRunTaskNotFound(t *testing.T) {
 func TestRunLockContention(t *testing.T) {
 	env := setupTestEnv(t)
 
-	// Acquire lock manually (our PID, so it's alive).
-	lk := lock.New(filepath.Join(env.BaseDir, ".hydra"), "other-task")
+	// Acquire lock for the same task (our PID, so it's alive).
+	lk := lock.New(filepath.Join(env.BaseDir, ".hydra"), "add-feature")
 	if err := lk.Acquire(); err != nil {
 		t.Fatalf("manual lock Acquire: %v", err)
 	}
@@ -410,10 +410,34 @@ func TestRunLockContention(t *testing.T) {
 
 	err = r.Run("add-feature")
 	if err == nil {
-		t.Fatal("expected error when lock is held")
+		t.Fatal("expected error when same task lock is held")
 	}
 	if !strings.Contains(err.Error(), "already running") {
 		t.Errorf("error = %q, want already running message", err)
+	}
+}
+
+func TestRunLockNoCrossTalkContention(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Acquire lock for a different task (our PID, so it's alive).
+	lk := lock.New(filepath.Join(env.BaseDir, ".hydra"), "another-task")
+	if err := lk.Acquire(); err != nil {
+		t.Fatalf("manual lock Acquire: %v", err)
+	}
+	defer func() { _ = lk.Release() }()
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Running a different task should succeed.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run should not be blocked by a different task's lock: %v", err)
 	}
 }
 
@@ -456,7 +480,7 @@ func TestRunStaleLockRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hydraDir, "hydra.lock"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(hydraDir, "hydra-add-feature.lock"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 

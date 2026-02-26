@@ -4,7 +4,7 @@ AI-driven local pull request workflow where Claude is the only contributor.
 
 ## What is Hydra?
 
-Hydra turns a tree of markdown design documents into branches, code, and commits without you writing a line. It assembles context from your design docs, calls the Anthropic API directly with an interactive TUI, runs tests and linting, and pushes a branch ready for your review.
+Hydra turns markdown documents that describe desired changes into branches, code, and commits without you writing a line. Each task is just a markdown file describing what to build or fix. Hydra assembles context from your design docs, drives Claude Code to implement each task, runs tests and linting, and pushes a branch ready for your review.
 
 ## Concepts
 
@@ -118,7 +118,7 @@ Opens your editor to create or edit a task file. The editor is resolved from `$V
 Executes the full task lifecycle:
 
 1. Finds the pending task by name (supports `group/name` for grouped tasks)
-2. Acquires a file lock — only one task runs at a time
+2. Acquires a per-task file lock — only one instance of the same task runs at a time; different tasks run concurrently
 3. Clones the source repo into a per-task work directory (`work/{task-name}/`)
 4. Creates a git branch `hydra/<task-name>`
 5. Assembles a document from `rules.md`, `lint.md`, the task content, and `functional.md`
@@ -252,7 +252,7 @@ project/
 │       └── 42-fix-bug/           # Issue task work directory
 ```
 
-Work directories persist between runs. On subsequent runs, hydra syncs the existing directory (fetch + reset) instead of re-cloning.
+Work directories persist between runs. On subsequent runs, hydra syncs the existing directory (fetch) instead of re-cloning.
 
 ## Building & Releasing
 

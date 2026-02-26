@@ -20,8 +20,8 @@ func TestAcquireAndRelease(t *testing.T) {
 	lk := New(dir, "test-task")
 	must(t, lk.Acquire())
 
-	// Lock file should exist.
-	lockPath := filepath.Join(dir, LockFile)
+	// Lock file should exist with the per-task filename.
+	lockPath := filepath.Join(dir, lockFileName("test-task"))
 	data, err := os.ReadFile(lockPath) //nolint:gosec // test reads from temp dir
 	if err != nil {
 		t.Fatalf("lock file not created: %v", err)
@@ -46,21 +46,37 @@ func TestAcquireAndRelease(t *testing.T) {
 	}
 }
 
-func TestAcquireBlockedByLiveLock(t *testing.T) {
+func TestAcquireBlockedBySameTask(t *testing.T) {
 	dir := t.TempDir()
 
 	// First lock (our own PID, so it's alive).
 	lk1 := New(dir, "task-1")
 	must(t, lk1.Acquire())
 
-	// Second lock should fail.
-	lk2 := New(dir, "task-2")
+	// Second lock with the same task name should fail.
+	lk2 := New(dir, "task-1")
 	err := lk2.Acquire()
 	if err == nil {
-		t.Fatal("expected error when lock is held by live process")
+		t.Fatal("expected error when same task lock is held by live process")
 	}
 
 	must(t, lk1.Release())
+}
+
+func TestAcquireNotBlockedByDifferentTask(t *testing.T) {
+	dir := t.TempDir()
+
+	lk1 := New(dir, "task-1")
+	must(t, lk1.Acquire())
+
+	// Different task name should succeed.
+	lk2 := New(dir, "task-2")
+	if err := lk2.Acquire(); err != nil {
+		t.Fatalf("different task should not be blocked: %v", err)
+	}
+
+	must(t, lk1.Release())
+	must(t, lk2.Release())
 }
 
 func TestAcquireStaleLock(t *testing.T) {
@@ -72,13 +88,13 @@ func TestAcquireStaleLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	must(t, os.WriteFile(filepath.Join(dir, LockFile), data, 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, lockFileName("stale-task")), data, 0o600))
 
-	lk := New(dir, "new-task")
+	lk := New(dir, "stale-task")
 	must(t, lk.Acquire())
 
 	// Verify we now hold the lock.
-	readData, err := os.ReadFile(filepath.Join(dir, LockFile)) //nolint:gosec // test reads from temp dir
+	readData, err := os.ReadFile(filepath.Join(dir, lockFileName("stale-task"))) //nolint:gosec // test reads from temp dir
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +107,8 @@ func TestAcquireStaleLock(t *testing.T) {
 	if ld.PID != os.Getpid() {
 		t.Errorf("PID = %d, want %d", ld.PID, os.Getpid())
 	}
-	if ld.TaskName != "new-task" {
-		t.Errorf("TaskName = %q, want new-task", ld.TaskName)
+	if ld.TaskName != "stale-task" {
+		t.Errorf("TaskName = %q, want stale-task", ld.TaskName)
 	}
 
 	must(t, lk.Release())
@@ -111,36 +127,52 @@ func TestReleaseIdempotent(t *testing.T) {
 	must(t, lk.Release())
 }
 
-func TestReadCurrent(t *testing.T) {
+func TestReadAll(t *testing.T) {
 	dir := t.TempDir()
 
-	lk := New(dir, "running-task")
-	must(t, lk.Acquire())
-	defer func() { must(t, lk.Release()) }()
+	lk1 := New(dir, "running-task-1")
+	must(t, lk1.Acquire())
+	defer func() { must(t, lk1.Release()) }()
 
-	taskName, pid, err := ReadCurrent(dir)
+	lk2 := New(dir, "running-task-2")
+	must(t, lk2.Acquire())
+	defer func() { must(t, lk2.Release()) }()
+
+	tasks, err := ReadAll(dir)
 	if err != nil {
-		t.Fatalf("ReadCurrent: %v", err)
+		t.Fatalf("ReadAll: %v", err)
 	}
 
-	if taskName != "running-task" {
-		t.Errorf("taskName = %q, want running-task", taskName)
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 running tasks, got %d", len(tasks))
 	}
-	if pid != os.Getpid() {
-		t.Errorf("pid = %d, want %d", pid, os.Getpid())
+
+	names := map[string]bool{}
+	for _, rt := range tasks {
+		names[rt.TaskName] = true
+		if rt.PID != os.Getpid() {
+			t.Errorf("PID = %d, want %d", rt.PID, os.Getpid())
+		}
+	}
+	if !names["running-task-1"] || !names["running-task-2"] {
+		t.Errorf("expected running-task-1 and running-task-2, got %v", names)
 	}
 }
 
-func TestReadCurrentNoLock(t *testing.T) {
+func TestReadAllNoLocks(t *testing.T) {
 	dir := t.TempDir()
 
-	_, _, err := ReadCurrent(dir)
-	if err == nil {
-		t.Fatal("expected error when no lock exists")
+	tasks, err := ReadAll(dir)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 running tasks, got %d", len(tasks))
 	}
 }
 
-func TestReadCurrentStaleLock(t *testing.T) {
+func TestReadAllStaleLock(t *testing.T) {
 	dir := t.TempDir()
 
 	stalePID := 4194304
@@ -148,10 +180,21 @@ func TestReadCurrentStaleLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	must(t, os.WriteFile(filepath.Join(dir, LockFile), data, 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, lockFileName("stale")), data, 0o600))
 
-	_, _, err = ReadCurrent(dir)
-	if err == nil {
-		t.Fatal("expected error for stale lock")
+	tasks, err := ReadAll(dir)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 running tasks (stale should be filtered), got %d", len(tasks))
+	}
+}
+
+func TestLockFileNameGroupedTask(t *testing.T) {
+	name := lockFileName("backend/add-api")
+	if name != "hydra-backend--add-api.lock" {
+		t.Errorf("lockFileName = %q, want hydra-backend--add-api.lock", name)
 	}
 }

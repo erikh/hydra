@@ -3,19 +3,22 @@ package lock
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
-
-// LockFile is the name of the lock file within the hydra directory.
-const LockFile = "hydra.lock"
 
 type lockData struct {
 	PID      int    `json:"pid"`
 	TaskName string `json:"task_name"`
+}
+
+// RunningTask describes a currently-running hydra task.
+type RunningTask struct {
+	TaskName string
+	PID      int
 }
 
 // Lock provides mutual exclusion for hydra task runs using a file-based lock.
@@ -24,10 +27,17 @@ type Lock struct {
 	taskName string
 }
 
+// lockFileName returns the per-task lock file name.
+// Slashes in grouped task names (e.g. "backend/add-api") are replaced with "--".
+func lockFileName(taskName string) string {
+	safe := strings.ReplaceAll(taskName, "/", "--")
+	return "hydra-" + safe + ".lock"
+}
+
 // New creates a new Lock for the given hydra directory and task name.
 func New(hydraDir, taskName string) *Lock {
 	return &Lock{
-		path:     filepath.Join(hydraDir, LockFile),
+		path:     filepath.Join(hydraDir, lockFileName(taskName)),
 		taskName: taskName,
 	}
 }
@@ -38,7 +48,7 @@ func (l *Lock) Acquire() error {
 	existing, err := l.read()
 	if err == nil && existing != nil {
 		if processAlive(existing.PID) {
-			return fmt.Errorf("another task %q is already running (PID %d)", existing.TaskName, existing.PID)
+			return fmt.Errorf("task %q is already running (PID %d)", existing.TaskName, existing.PID)
 		}
 		// Stale lock, remove it.
 		_ = os.Remove(l.path)
@@ -81,19 +91,33 @@ func (l *Lock) read() (*lockData, error) {
 	return &ld, nil
 }
 
-// ReadCurrent reads the current lock and returns the task name and PID if the lock is held by a live process.
-func ReadCurrent(hydraDir string) (string, int, error) {
-	l := &Lock{path: filepath.Join(hydraDir, LockFile)}
-	ld, err := l.read()
+// ReadAll scans the hydra directory for per-task lock files and returns
+// all tasks that are currently held by live processes.
+func ReadAll(hydraDir string) ([]RunningTask, error) {
+	pattern := filepath.Join(hydraDir, "hydra-*.lock")
+	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return "", 0, err
+		return nil, fmt.Errorf("globbing lock files: %w", err)
 	}
 
-	if !processAlive(ld.PID) {
-		return "", 0, errors.New("no active task (stale lock)")
+	var running []RunningTask
+	for _, path := range matches {
+		data, err := os.ReadFile(path) //nolint:gosec // lock files in hydra dir
+		if err != nil {
+			continue
+		}
+
+		var ld lockData
+		if err := json.Unmarshal(data, &ld); err != nil {
+			continue
+		}
+
+		if processAlive(ld.PID) {
+			running = append(running, RunningTask{TaskName: ld.TaskName, PID: ld.PID})
+		}
 	}
 
-	return ld.TaskName, ld.PID, nil
+	return running, nil
 }
 
 func processAlive(pid int) bool {

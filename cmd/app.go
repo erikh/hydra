@@ -372,10 +372,14 @@ func statusCommand() *cli.Command {
 				return err
 			}
 
-			// Show current running task
-			taskName, pid, err := lock.ReadCurrent(config.HydraPath("."))
-			if err == nil {
-				fmt.Printf("Running: %s (PID %d)\n\n", taskName, pid)
+			// Show currently running tasks
+			running, err := lock.ReadAll(config.HydraPath("."))
+			if err == nil && len(running) > 0 {
+				fmt.Println("Running:")
+				for _, rt := range running {
+					fmt.Printf("  - %s (PID %d)\n", rt.TaskName, rt.PID)
+				}
+				fmt.Println()
 			}
 
 			// Show tasks by state
