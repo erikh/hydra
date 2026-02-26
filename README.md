@@ -258,14 +258,16 @@ Lists milestone targets and historical scores with letter grades (A-F).
 
 ### `hydra completion`
 
-Manage shell tab completion.
+Print or manage shell tab completion.
 
 ```sh
+hydra completion bash        # Print bash completion script to stdout
+hydra completion zsh         # Print zsh completion script to stdout
 hydra completion install     # Inject completion into your shell RC file
 hydra completion uninstall   # Remove completion from your shell RC file
 ```
 
-Supports bash and zsh, detected from `$SHELL`. On first run, hydra automatically prompts to install completion; the decision is saved in `~/.hydra/completion`.
+`install` injects a one-liner into your RC file (`~/.bashrc` or `~/.zshrc`) that evals `hydra completion <shell>` at startup, guarded by a `command -v hydra` check so it no-ops if hydra is not installed. Supports bash and zsh, detected from `$SHELL`. On first run, hydra automatically prompts to install completion; the decision is saved in `~/.hydra/completion`.
 
 ## hydra.yml
 
@@ -384,13 +386,15 @@ All fields are optional. Missing fields fall through to pywal (`~/.cache/wal/col
 
 Hydra supports tab completion for task names. All commands that accept a task name complete with the appropriate tasks for their state (e.g. `hydra run` completes pending tasks, `hydra review run` completes review tasks).
 
-On first run, hydra prompts to inject completion into your shell RC file (`~/.bashrc` or `~/.zshrc`, based on `$SHELL`). The decision is recorded in `~/.hydra/completion` so you're only asked once.
+On first run, hydra prompts to inject completion into your shell RC file (`~/.bashrc` or `~/.zshrc`, based on `$SHELL`). The decision is recorded in `~/.hydra/completion` so you're only asked once. The injected line evals `hydra completion <shell>` at startup, guarded by `command -v hydra` so it no-ops if hydra is uninstalled.
 
 You can also manage completion manually:
 
 ```sh
-hydra completion install     # Inject completion into your shell RC file
-hydra completion uninstall   # Remove completion from your shell RC file
+hydra completion bash        # Print bash completion script to stdout
+hydra completion zsh         # Print zsh completion script to stdout
+hydra completion install     # Inject eval into your shell RC file
+hydra completion uninstall   # Remove it from your shell RC file
 ```
 
 Both bash and zsh are supported. The shell type is detected from `$SHELL`.

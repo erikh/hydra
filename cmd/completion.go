@@ -139,18 +139,6 @@ func shellRCPath() string {
 	}
 }
 
-// completionSnippet returns the inline completion script for the given shell.
-func completionSnippet(shell string) string {
-	switch shell {
-	case "bash":
-		return bashCompletionScript
-	case "zsh":
-		return zshCompletionScript
-	default:
-		return ""
-	}
-}
-
 // rcContainsCompletion checks if the RC file already has the hydra completion block.
 func rcContainsCompletion(rcPath string) bool {
 	data, err := os.ReadFile(rcPath)
@@ -161,29 +149,20 @@ func rcContainsCompletion(rcPath string) bool {
 }
 
 // injectCompletion appends the completion block to the RC file.
+// The injected snippet evals `hydra completion <shell>` at shell startup,
+// guarded by a command-existence check so it no-ops if hydra is not installed.
 func injectCompletion(rcPath, shell string) error {
 	if rcContainsCompletion(rcPath) {
 		return nil
 	}
 
-	snippet := completionSnippet(shell)
-	if snippet == "" {
+	if shell != "bash" && shell != "zsh" {
 		return fmt.Errorf("unsupported shell: %s", shell)
 	}
 
-	// Comment each line of the snippet for embedding in the RC file.
-	var commented strings.Builder
-	for _, line := range strings.Split(strings.TrimRight(snippet, "\n"), "\n") {
-		if line == "" {
-			commented.WriteString("#\n")
-		} else {
-			commented.WriteString("# " + line + "\n")
-		}
-	}
-
-	block := fmt.Sprintf("\n%s\nPROG=hydra source <(cat <<'HYDRA_COMPLETION'\n%sHYDRA_COMPLETION\n)\n%s\n",
+	block := fmt.Sprintf("\n%s\ncommand -v hydra &>/dev/null && eval \"$(hydra completion %s)\"\n%s\n",
 		completionBeginMarker,
-		snippet,
+		shell,
 		completionEndMarker,
 	)
 
@@ -284,9 +263,27 @@ func completionCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "completion",
 		Usage: "Manage shell tab completion",
-		Description: "Install or uninstall shell tab completion for hydra. " +
-			"Supports bash and zsh, detected from $SHELL.",
+		Description: "Print or install shell tab completion for hydra. " +
+			"Use `hydra completion bash` or `hydra completion zsh` to print the " +
+			"completion script to stdout. Use install/uninstall to manage the " +
+			"shell RC file injection.",
 		Subcommands: []*cli.Command{
+			{
+				Name:  "bash",
+				Usage: "Print bash completion script to stdout",
+				Action: func(_ *cli.Context) error {
+					fmt.Print(bashCompletionScript)
+					return nil
+				},
+			},
+			{
+				Name:  "zsh",
+				Usage: "Print zsh completion script to stdout",
+				Action: func(_ *cli.Context) error {
+					fmt.Print(zshCompletionScript)
+					return nil
+				},
+			},
 			{
 				Name:  "install",
 				Usage: "Inject completion into your shell RC file",
