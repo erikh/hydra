@@ -1174,3 +1174,253 @@ func TestRunWithModelOverride(t *testing.T) {
 		t.Errorf("Model = %q, want claude-haiku-4-5-20251001", captured.Model)
 	}
 }
+
+func TestCommitInstructionsUnsigned(t *testing.T) {
+	result := commitInstructions(false, map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	})
+
+	if !strings.Contains(result, "# Commit Instructions") {
+		t.Error("missing header")
+	}
+	if !strings.Contains(result, "go test ./...") {
+		t.Error("missing test command")
+	}
+	if !strings.Contains(result, "golangci-lint run") {
+		t.Error("missing lint command")
+	}
+	if !strings.Contains(result, "git add -A") {
+		t.Error("missing git add instruction")
+	}
+	if !strings.Contains(result, "git commit -m") {
+		t.Error("missing git commit instruction")
+	}
+	if strings.Contains(result, "-S") {
+		t.Error("should not contain -S for unsigned commits")
+	}
+	if !strings.Contains(result, "Co-Authored-By") {
+		t.Error("missing no-trailers instruction")
+	}
+}
+
+func TestCommitInstructionsSigned(t *testing.T) {
+	result := commitInstructions(true, nil)
+
+	if !strings.Contains(result, "git commit -S") {
+		t.Error("should contain -S for signed commits")
+	}
+}
+
+func TestCommitInstructionsNilCommands(t *testing.T) {
+	result := commitInstructions(false, nil)
+
+	if strings.Contains(result, "Run the test suite") {
+		t.Error("should not mention test suite when commands is nil")
+	}
+	if strings.Contains(result, "Run the linter") {
+		t.Error("should not mention linter when commands is nil")
+	}
+	if !strings.Contains(result, "git commit -m") {
+		t.Error("should still contain commit instruction")
+	}
+}
+
+func TestReviewDocumentIncludesValidation(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Capture the review document.
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	if err := r.Review("add-feature"); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+
+	// Verify commit message validation section.
+	if !strings.Contains(captured, "Commit Message Validation") {
+		t.Error("review document missing commit message validation section")
+	}
+	if !strings.Contains(captured, "git log") {
+		t.Error("review document should instruct to read git log")
+	}
+
+	// Verify test coverage validation section.
+	if !strings.Contains(captured, "Test Coverage Validation") {
+		t.Error("review document missing test coverage validation section")
+	}
+	if !strings.Contains(captured, "test coverage") {
+		t.Error("review document should mention test coverage")
+	}
+
+	// Verify commit instructions are appended.
+	if !strings.Contains(captured, "# Commit Instructions") {
+		t.Error("review document missing commit instructions")
+	}
+}
+
+func TestReviewCommitsAndPushes(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Review with Claude that makes changes and commits.
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "review-fix.go"), []byte("package main\n// review fix"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+
+	if err := r.Review("add-feature"); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+
+	// Verify the review commit was pushed to the remote.
+	wd := workDirForTask(env.BaseDir)
+	localSHA, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "HEAD").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+
+	remoteSHA, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "rev-parse", "hydra/add-feature").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git rev-parse remote: %v", err)
+	}
+
+	if strings.TrimSpace(string(localSHA)) != strings.TrimSpace(string(remoteSHA)) {
+		t.Errorf("local SHA %q != remote SHA %q", strings.TrimSpace(string(localSHA)), strings.TrimSpace(string(remoteSHA)))
+	}
+
+	// Verify record.json has the review entry.
+	recordPath := filepath.Join(env.DesignDir, "state", "record.json")
+	data, err := os.ReadFile(recordPath) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading record.json: %v", err)
+	}
+	var entries []map[string]string
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("parsing record.json: %v", err)
+	}
+	foundReview := false
+	for _, e := range entries {
+		if e["task_name"] == "review:add-feature" {
+			foundReview = true
+		}
+	}
+	if !foundReview {
+		t.Error("record.json missing review:add-feature entry")
+	}
+}
+
+func TestMergeInvokesPreMergeChecks(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Track Claude invocations during merge.
+	var docs []string
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		docs = append(docs, cfg.Document)
+		return nil
+	}
+
+	if err := r.Merge("add-feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Find the pre-merge verification document.
+	preMergeDoc := ""
+	for _, doc := range docs {
+		if strings.Contains(doc, "Pre-Merge Verification") {
+			preMergeDoc = doc
+			break
+		}
+	}
+	if preMergeDoc == "" {
+		t.Fatal("merge did not invoke pre-merge checks")
+	}
+
+	// Verify it contains all check sections.
+	for _, want := range []string{
+		"Commit Message Validation",
+		"Test Coverage",
+		"Lint",
+		"Tests",
+		"Add the feature.",
+	} {
+		if !strings.Contains(preMergeDoc, want) {
+			t.Errorf("pre-merge doc missing %q", want)
+		}
+	}
+}
+
+func TestAutoCreateHydraYml(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Remove the hydra.yml that setupTestEnv created.
+	ymlPath := filepath.Join(env.DesignDir, "hydra.yml")
+	if err := os.Remove(ymlPath); err != nil {
+		t.Fatalf("removing hydra.yml: %v", err)
+	}
+
+	// Creating a new runner should auto-create hydra.yml.
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Verify the file was created.
+	if _, err := os.Stat(ymlPath); err != nil {
+		t.Fatalf("hydra.yml not auto-created: %v", err)
+	}
+
+	// Verify the content matches the default placeholder.
+	data, err := os.ReadFile(ymlPath) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading hydra.yml: %v", err)
+	}
+	if string(data) != defaultHydraYml {
+		t.Errorf("hydra.yml content = %q, want %q", string(data), defaultHydraYml)
+	}
+
+	// Verify runner still works (commands are commented out so TaskRunner has no active commands).
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run after auto-create: %v", err)
+	}
+}
