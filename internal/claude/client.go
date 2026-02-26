@@ -6,7 +6,7 @@ import (
 )
 
 // DefaultModel is the model used when none is specified.
-const DefaultModel = "claude-sonnet-4-6"
+const DefaultModel = "claude-opus-4-6"
 
 // DefaultMaxTokens is the default maximum token count.
 const DefaultMaxTokens = 16384

@@ -137,6 +137,14 @@ func mockClaudeCapture(captured *string) ClaudeFunc {
 	}
 }
 
+// mockClaudeCaptureConfig captures the full ClaudeRunConfig.
+func mockClaudeCaptureConfig(captured *ClaudeRunConfig) ClaudeFunc {
+	return func(_ context.Context, cfg ClaudeRunConfig) error {
+		*captured = cfg
+		return os.WriteFile(filepath.Join(cfg.RepoDir, "output.txt"), []byte("done"), 0o600)
+	}
+}
+
 // workDirForTask returns the expected work directory for "add-feature" in tests.
 func workDirForTask(baseDir string) string {
 	return filepath.Join(baseDir, "work", "add-feature")
@@ -1063,5 +1071,27 @@ func TestMergeCRUDOperatesOnMergeState(t *testing.T) {
 	_, err = dd.FindTaskByState("add-feature", design.StateAbandoned)
 	if err != nil {
 		t.Error("task should be abandoned after MergeRemove")
+	}
+}
+
+func TestRunWithModelOverride(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var captured ClaudeRunConfig
+	r.Claude = mockClaudeCaptureConfig(&captured)
+	r.BaseDir = env.BaseDir
+	r.Model = "claude-haiku-4-5-20251001"
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if captured.Model != "claude-haiku-4-5-20251001" {
+		t.Errorf("Model = %q, want claude-haiku-4-5-20251001", captured.Model)
 	}
 }

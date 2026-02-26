@@ -277,6 +277,10 @@ func runCommand() *cli.Command {
 				Aliases: []string{"y"},
 				Usage:   "Auto-accept all tool calls without prompting",
 			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "Override the Claude model",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 1 {
@@ -295,6 +299,9 @@ func runCommand() *cli.Command {
 
 			if c.Bool("auto-accept") {
 				r.AutoAccept = true
+			}
+			if m := c.String("model"); m != "" {
+				r.Model = m
 			}
 
 			return r.Run(c.Args().Get(0))
@@ -316,6 +323,10 @@ func runGroupCommand() *cli.Command {
 				Aliases: []string{"y"},
 				Usage:   "Auto-accept all tool calls without prompting",
 			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "Override the Claude model",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 1 {
@@ -334,6 +345,9 @@ func runGroupCommand() *cli.Command {
 
 			if c.Bool("auto-accept") {
 				r.AutoAccept = true
+			}
+			if m := c.String("model"); m != "" {
+				r.Model = m
 			}
 
 			return r.RunGroup(c.Args().Get(0))
@@ -578,6 +592,10 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 						Aliases: []string{"y"},
 						Usage:   "Auto-accept all tool calls without prompting",
 					},
+					&cli.StringFlag{
+						Name:  "model",
+						Usage: "Override the Claude model",
+					},
 				},
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
@@ -589,6 +607,9 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 					}
 					if c.Bool("auto-accept") {
 						r.AutoAccept = true
+					}
+					if m := c.String("model"); m != "" {
+						r.Model = m
 					}
 					return ops.run(r, c.Args().Get(0))
 				},
