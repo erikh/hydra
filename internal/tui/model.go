@@ -22,7 +22,10 @@ const (
 	StateError                         // session ended with an error
 )
 
-const stateStreaming = "Streaming"
+const (
+	stateStreaming    = "Streaming"
+	stateInitializing = "Initializing..."
+)
 
 // Model is the root Bubbletea model for the Claude session TUI.
 type Model struct {
@@ -245,7 +248,7 @@ func handleEvent(m *Model, msg eventMsg) []tea.Cmd {
 // View implements tea.Model.
 func (m Model) View() string {
 	if !m.ready {
-		return "Initializing..."
+		return stateInitializing
 	}
 
 	var sections []string
