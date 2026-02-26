@@ -12,10 +12,10 @@ go install github.com/erikh/hydra@latest
 
 ### Credentials
 
-Hydra calls the Anthropic API directly. Provide credentials in one of two ways:
+Hydra calls the Anthropic API directly. Credentials are resolved in order:
 
-1. **Environment variable** (recommended): set `ANTHROPIC_API_KEY`
-2. **Claude CLI credentials**: Hydra reads `~/.claude/.credentials.json` (the OAuth token from the Claude CLI)
+1. **Claude CLI credentials** (checked first): Hydra reads `~/.claude/.credentials.json` (the OAuth token from the Claude CLI)
+2. **Environment variable** (fallback): set `ANTHROPIC_API_KEY`
 
 ## Quick Start
 

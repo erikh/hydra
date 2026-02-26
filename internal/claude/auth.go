@@ -17,21 +17,29 @@ type Credentials struct {
 }
 
 // LoadCredentials resolves API credentials.
-// It checks ANTHROPIC_API_KEY first, then falls back to ~/.claude/.credentials.json.
+// It checks ~/.claude/.credentials.json first, then falls back to ANTHROPIC_API_KEY.
 func LoadCredentials() (*Credentials, error) {
+	if creds, err := loadFromCredentialsFile(); err == nil {
+		return creds, nil
+	}
+
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 		return &Credentials{APIKey: key}, nil
 	}
 
+	return nil, errors.New("no credentials found: set ANTHROPIC_API_KEY or log in with the Claude CLI (~/.claude/.credentials.json)")
+}
+
+func loadFromCredentialsFile() (*Credentials, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, errors.New("no ANTHROPIC_API_KEY set and cannot determine home directory")
+		return nil, err
 	}
 
 	credPath := filepath.Join(home, ".claude", ".credentials.json")
 	data, err := os.ReadFile(credPath) //nolint:gosec // standard credential file location
 	if err != nil {
-		return nil, errors.New("no ANTHROPIC_API_KEY set and ~/.claude/.credentials.json not found")
+		return nil, err
 	}
 
 	var raw map[string]json.RawMessage

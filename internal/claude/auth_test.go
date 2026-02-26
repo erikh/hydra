@@ -7,6 +7,9 @@ import (
 )
 
 func TestLoadCredentialsFromEnv(t *testing.T) {
+	// No credentials file — env var should be used as fallback.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
 
 	creds, err := LoadCredentials()
@@ -46,6 +49,34 @@ func TestLoadCredentialsFromJSON(t *testing.T) {
 	}
 	if result.ExpiresAt != 1700000000 {
 		t.Errorf("ExpiresAt = %d, want 1700000000", result.ExpiresAt)
+	}
+}
+
+func TestLoadCredentialsFileTakesPrecedence(t *testing.T) {
+	// When both credentials file and env var exist, the file should win.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-should-not-be-used")
+
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	creds := `{"claudeAiOauth":{"accessToken":"oauth-from-file","refreshToken":"refresh","expiresAt":1700000000}}` //nolint:gosec // test data
+	if err := os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(creds), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadCredentials()
+	if err != nil {
+		t.Fatalf("LoadCredentials: %v", err)
+	}
+	if result.AccessToken != "oauth-from-file" {
+		t.Errorf("AccessToken = %q, want oauth-from-file (file should take precedence over env)", result.AccessToken)
+	}
+	if result.APIKey != "" {
+		t.Errorf("APIKey = %q, want empty (file credentials should be used, not env)", result.APIKey)
 	}
 }
 
