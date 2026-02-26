@@ -130,9 +130,11 @@ Executes the full task lifecycle:
 
 **Flags:**
 
-- `--auto-accept` / `-y` — Auto-accept all tool calls without prompting and disable plan mode for fully autonomous execution
-- `--plan` — Start Claude in plan mode (default behavior; use with `-y` to auto-accept tools but still start in plan mode)
+- `--no-auto-accept` / `-Y` — Disable auto-accept (prompt for each tool call)
+- `--no-plan` / `-P` — Disable plan mode (skip plan approval, run fully autonomously)
 - `--model` — Override the Claude model (e.g. `--model claude-haiku-4-5-20251001`)
+
+By default, hydra auto-accepts all tool calls and starts Claude in plan mode.
 
 ### `hydra run-group <group-name>`
 
@@ -140,8 +142,8 @@ Executes all pending tasks in the named group sequentially, in alphabetical orde
 
 **Flags:**
 
-- `--auto-accept` / `-y` — Auto-accept all tool calls without prompting and disable plan mode
-- `--plan` — Start Claude in plan mode (default; use with `-y` to auto-accept but still plan)
+- `--no-auto-accept` / `-Y` — Disable auto-accept (prompt for each tool call)
+- `--no-plan` / `-P` — Disable plan mode
 - `--model` — Override the Claude model
 
 ### `hydra review`
@@ -153,12 +155,12 @@ hydra review list                  # List tasks in review state
 hydra review view <task-name>      # Print task content
 hydra review edit <task-name>      # Open task in editor
 hydra review rm <task-name>        # Move task to abandoned
-hydra review run <task-name> [-y]  # Run interactive review session
+hydra review run <task-name>       # Run interactive review session
 ```
 
 `hydra review run` opens a TUI session where Claude reviews the implementation, runs tests, and makes corrections. The task stays in review state after the session.
 
-**`run` flags:** `--auto-accept` / `-y`, `--plan`, `--model`
+**`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
 ### `hydra merge`
 
@@ -169,12 +171,12 @@ hydra merge list                   # List tasks in merge state
 hydra merge view <task-name>       # Print task content
 hydra merge edit <task-name>       # Open task in editor
 hydra merge rm <task-name>         # Move task to abandoned
-hydra merge run <task-name> [-y]   # Run merge workflow
+hydra merge run <task-name>        # Run merge workflow
 ```
 
 `hydra merge run` performs: rebase onto `origin/main`, resolve conflicts via Claude if needed, run tests/lint, fast-forward merge, push, record SHA, move to completed, and close the remote issue if applicable.
 
-**`run` flags:** `--auto-accept` / `-y`, `--plan`, `--model`
+**`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
 ### `hydra other`
 

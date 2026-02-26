@@ -273,13 +273,14 @@ func runCommand() *cli.Command {
 			"and moves the task to review.",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:    "auto-accept",
-				Aliases: []string{"y"},
-				Usage:   "Auto-accept all tool calls without prompting (disables plan mode)",
+				Name:    "no-auto-accept",
+				Aliases: []string{"Y"},
+				Usage:   "Disable auto-accept (prompt for each tool call)",
 			},
 			&cli.BoolFlag{
-				Name:  "plan",
-				Usage: "Start Claude in plan mode (default; use with -y to auto-accept but still start in plan mode)",
+				Name:    "no-plan",
+				Aliases: []string{"P"},
+				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 			},
 			&cli.StringFlag{
 				Name:  "model",
@@ -301,13 +302,13 @@ func runCommand() *cli.Command {
 				return err
 			}
 
+			r.AutoAccept = true
 			r.PlanMode = true
-			if c.Bool("auto-accept") {
-				r.AutoAccept = true
-				r.PlanMode = false
+			if c.Bool("no-auto-accept") {
+				r.AutoAccept = false
 			}
-			if c.Bool("plan") {
-				r.PlanMode = true
+			if c.Bool("no-plan") {
+				r.PlanMode = false
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m
@@ -328,13 +329,14 @@ func runGroupCommand() *cli.Command {
 			"Stops immediately on the first error.",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:    "auto-accept",
-				Aliases: []string{"y"},
-				Usage:   "Auto-accept all tool calls without prompting (disables plan mode)",
+				Name:    "no-auto-accept",
+				Aliases: []string{"Y"},
+				Usage:   "Disable auto-accept (prompt for each tool call)",
 			},
 			&cli.BoolFlag{
-				Name:  "plan",
-				Usage: "Start Claude in plan mode (default; use with -y to auto-accept but still start in plan mode)",
+				Name:    "no-plan",
+				Aliases: []string{"P"},
+				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 			},
 			&cli.StringFlag{
 				Name:  "model",
@@ -356,13 +358,13 @@ func runGroupCommand() *cli.Command {
 				return err
 			}
 
+			r.AutoAccept = true
 			r.PlanMode = true
-			if c.Bool("auto-accept") {
-				r.AutoAccept = true
-				r.PlanMode = false
+			if c.Bool("no-auto-accept") {
+				r.AutoAccept = false
 			}
-			if c.Bool("plan") {
-				r.PlanMode = true
+			if c.Bool("no-plan") {
+				r.PlanMode = false
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m
@@ -625,13 +627,14 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 				ArgsUsage: "<task-name>",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
-						Name:    "auto-accept",
-						Aliases: []string{"y"},
-						Usage:   "Auto-accept all tool calls without prompting (disables plan mode)",
+						Name:    "no-auto-accept",
+						Aliases: []string{"Y"},
+						Usage:   "Disable auto-accept (prompt for each tool call)",
 					},
 					&cli.BoolFlag{
-						Name:  "plan",
-						Usage: "Start Claude in plan mode (default; use with -y to auto-accept but still start in plan mode)",
+						Name:    "no-plan",
+						Aliases: []string{"P"},
+						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 					},
 					&cli.StringFlag{
 						Name:  "model",
@@ -646,13 +649,13 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 					if err != nil {
 						return err
 					}
+					r.AutoAccept = true
 					r.PlanMode = true
-					if c.Bool("auto-accept") {
-						r.AutoAccept = true
-						r.PlanMode = false
+					if c.Bool("no-auto-accept") {
+						r.AutoAccept = false
 					}
-					if c.Bool("plan") {
-						r.PlanMode = true
+					if c.Bool("no-plan") {
+						r.PlanMode = false
 					}
 					if m := c.String("model"); m != "" {
 						r.Model = m

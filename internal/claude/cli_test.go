@@ -20,15 +20,49 @@ func TestBuildArgs(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "prompt only",
+			name: "no flags (prompt only)",
 			cfg: CLIConfig{
-				Prompt:   "hello world",
-				PlanMode: true,
+				Prompt: "hello world",
 			},
-			want: []string{"--permission-mode", "plan", "hello world"},
+			want: []string{"hello world"},
 		},
 		{
-			name: "with model",
+			name: "default: auto-accept and plan",
+			cfg: CLIConfig{
+				Prompt:     "hello world",
+				AutoAccept: true,
+				PlanMode:   true,
+			},
+			want: []string{"--dangerously-skip-permissions", "--permission-mode", "plan", "hello world"},
+		},
+		{
+			name: "plan only (no-auto-accept)",
+			cfg: CLIConfig{
+				Prompt:   "do something",
+				PlanMode: true,
+			},
+			want: []string{"--permission-mode", "plan", "do something"},
+		},
+		{
+			name: "auto-accept only (no-plan)",
+			cfg: CLIConfig{
+				Prompt:     "fix bug",
+				AutoAccept: true,
+			},
+			want: []string{"--permission-mode", "bypassPermissions", "fix bug"},
+		},
+		{
+			name: "with model and defaults",
+			cfg: CLIConfig{
+				Prompt:     "do something",
+				Model:      "claude-opus-4-6",
+				AutoAccept: true,
+				PlanMode:   true,
+			},
+			want: []string{"--model", "claude-opus-4-6", "--dangerously-skip-permissions", "--permission-mode", "plan", "do something"},
+		},
+		{
+			name: "with model, plan only",
 			cfg: CLIConfig{
 				Prompt:   "do something",
 				Model:    "claude-opus-4-6",
@@ -37,31 +71,13 @@ func TestBuildArgs(t *testing.T) {
 			want: []string{"--model", "claude-opus-4-6", "--permission-mode", "plan", "do something"},
 		},
 		{
-			name: "auto accept only",
+			name: "with model, auto-accept only",
 			cfg: CLIConfig{
-				Prompt:     "fix bug",
-				AutoAccept: true,
-			},
-			want: []string{"--permission-mode", "bypassPermissions", "fix bug"},
-		},
-		{
-			name: "auto accept with plan",
-			cfg: CLIConfig{
-				Prompt:     "fix bug",
-				AutoAccept: true,
-				PlanMode:   true,
-			},
-			want: []string{"--dangerously-skip-permissions", "--permission-mode", "plan", "fix bug"},
-		},
-		{
-			name: "all options",
-			cfg: CLIConfig{
-				Prompt:     "implement feature",
+				Prompt:     "do something",
 				Model:      "claude-sonnet-4-6",
 				AutoAccept: true,
-				PlanMode:   true,
 			},
-			want: []string{"--model", "claude-sonnet-4-6", "--dangerously-skip-permissions", "--permission-mode", "plan", "implement feature"},
+			want: []string{"--model", "claude-sonnet-4-6", "--permission-mode", "bypassPermissions", "do something"},
 		},
 	}
 
