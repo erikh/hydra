@@ -11,10 +11,30 @@ import (
 	"strings"
 )
 
-// EditNewTask opens an editor to create a new task file in the design directory.
-// It rejects task names containing "/" (no group support yet), checks for duplicates,
-// and only saves the file if the editor exits successfully with non-empty content.
-func EditNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, stderr io.Writer) error {
+// runEditor opens the given file in the specified editor, attaching stdin/stdout/stderr.
+func runEditor(editor, filePath string, stdin io.Reader, stdout, stderr io.Writer) error {
+	cmd := exec.CommandContext(context.Background(), editor, filePath)
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("editor exited with error: %w", err)
+	}
+	return nil
+}
+
+// RunEditorOnFile opens the given file in the editor. This is the public wrapper
+// for the internal runEditor helper, for use by other packages.
+func RunEditorOnFile(editor, filePath string, stdin io.Reader, stdout, stderr io.Writer) error {
+	return runEditor(editor, filePath, stdin, stdout, stderr)
+}
+
+// EditTask opens an editor to create or edit a task file in the design directory.
+// If the task already exists in tasks/, it opens the existing file in-place.
+// Otherwise, it creates a new task via a temp file (only saving if non-empty).
+// Task names must not contain '/'.
+func EditTask(designDir, taskName, editor string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if strings.Contains(taskName, "/") {
 		return errors.New("task name must not contain '/' (grouped tasks not supported for edit)")
 	}
@@ -22,9 +42,18 @@ func EditNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, st
 	tasksDir := filepath.Join(designDir, "tasks")
 	destPath := filepath.Join(tasksDir, taskName+".md")
 
+	// If the task already exists, open it in-place.
 	if _, err := os.Stat(destPath); err == nil {
-		return fmt.Errorf("task %q already exists", taskName)
+		return runEditor(editor, destPath, stdin, stdout, stderr)
 	}
+
+	return createNewTask(designDir, taskName, editor, stdin, stdout, stderr)
+}
+
+// createNewTask creates a new task file via a temp file, only saving if non-empty.
+func createNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, stderr io.Writer) error {
+	tasksDir := filepath.Join(designDir, "tasks")
+	destPath := filepath.Join(tasksDir, taskName+".md")
 
 	tmpFile, err := os.CreateTemp("", "hydra-task-*.md")
 	if err != nil {
@@ -34,13 +63,8 @@ func EditNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, st
 	_ = tmpFile.Close()
 	defer func() { _ = os.Remove(tmpPath) }()
 
-	cmd := exec.CommandContext(context.Background(), editor, tmpPath) //nolint:gosec // editor is user-provided via $VISUAL/$EDITOR
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("editor exited with error: %w", err)
+	if err := runEditor(editor, tmpPath, stdin, stdout, stderr); err != nil {
+		return err
 	}
 
 	content, err := os.ReadFile(tmpPath) //nolint:gosec // path is from our own temp file
@@ -64,4 +88,9 @@ func EditNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, st
 	}
 
 	return nil
+}
+
+// EditNewTask is deprecated; use EditTask instead.
+func EditNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, stderr io.Writer) error {
+	return EditTask(designDir, taskName, editor, stdin, stdout, stderr)
 }

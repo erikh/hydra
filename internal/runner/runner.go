@@ -11,6 +11,7 @@ import (
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
+	"github.com/erikh/hydra/internal/issues"
 	"github.com/erikh/hydra/internal/lock"
 	"github.com/erikh/hydra/internal/repo"
 	"github.com/erikh/hydra/internal/taskrun"
@@ -29,14 +30,14 @@ type ClaudeFunc func(ctx context.Context, cfg ClaudeRunConfig) error
 
 // Runner orchestrates the full hydra run workflow.
 type Runner struct {
-	Config     *config.Config
-	Design     *design.Dir
-	Repo       *repo.Repo
-	Claude     ClaudeFunc
-	TaskRunner *taskrun.Commands // loaded from hydra.yml; nil if not present
-	BaseDir    string            // working directory for lock file; defaults to "."
-	Model      string            // model name override
-	AutoAccept bool              // auto-accept all tool calls
+	Config      *config.Config
+	Design      *design.Dir
+	Claude      ClaudeFunc
+	TaskRunner  *taskrun.Commands // loaded from hydra.yml; nil if not present
+	BaseDir     string            // working directory for lock file; defaults to "."
+	Model       string            // model name override
+	AutoAccept  bool              // auto-accept all tool calls
+	IssueCloser issues.Closer     // set by merge workflow
 }
 
 // New creates a Runner from the given config.
@@ -49,25 +50,106 @@ func New(cfg *config.Config) (*Runner, error) {
 	r := &Runner{
 		Config:  cfg,
 		Design:  dd,
-		Repo:    repo.Open(cfg.RepoDir),
 		Claude:  invokeClaude,
 		BaseDir: ".",
 	}
 
-	// Load hydra.yml if it exists.
-	ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
-	if _, err := os.Stat(ymlPath); err == nil {
-		cmds, err := taskrun.Load(ymlPath)
-		if err != nil {
-			return nil, fmt.Errorf("loading hydra.yml: %w", err)
-		}
-		r.TaskRunner = cmds
-		if cmds.Model != "" {
-			r.Model = cmds.Model
-		}
+	if err := r.loadHydraYml(cfg); err != nil {
+		return nil, err
 	}
 
 	return r, nil
+}
+
+// loadHydraYml loads hydra.yml and resolves issue closer.
+func (r *Runner) loadHydraYml(cfg *config.Config) error {
+	ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
+	if !fileExists(ymlPath) {
+		// No hydra.yml — try resolving issue closer without overrides.
+		r.resolveIssueCloser(cfg.SourceRepoURL, "", "")
+		return nil
+	}
+
+	cmds, err := taskrun.Load(ymlPath)
+	if err != nil {
+		return fmt.Errorf("loading hydra.yml: %w", err)
+	}
+	r.TaskRunner = cmds
+	if cmds.Model != "" {
+		r.Model = cmds.Model
+	}
+
+	r.resolveIssueCloser(cfg.SourceRepoURL, cmds.APIType, cmds.GiteaURL)
+	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// resolveIssueCloser attempts to set the issue closer from the source URL.
+func (r *Runner) resolveIssueCloser(repoURL, apiType, giteaURL string) {
+	source, err := issues.ResolveSource(repoURL, apiType, giteaURL)
+	if err == nil {
+		r.IssueCloser = issues.ResolveCloser(source)
+	}
+}
+
+// workDir returns the work directory path for a task.
+// Ungrouped tasks: work/{name}, grouped tasks: work/{group}/{name}.
+func (r *Runner) workDir(task *design.Task) string {
+	baseDir := r.BaseDir
+	if baseDir == "" {
+		baseDir = "."
+	}
+	if task.Group != "" {
+		return filepath.Join(baseDir, "work", task.Group, task.Name)
+	}
+	return filepath.Join(baseDir, "work", task.Name)
+}
+
+// prepareRepo sets up the work directory for a task.
+// If the directory exists and is a valid git repo, it fetches and resets.
+// Otherwise, it clones fresh from the source repo URL.
+func (r *Runner) prepareRepo(workDir string) (*repo.Repo, error) {
+	if taskRepo, ok := r.trySyncExisting(workDir); ok {
+		return taskRepo, nil
+	}
+	return repo.Clone(r.Config.SourceRepoURL, workDir)
+}
+
+// trySyncExisting attempts to sync an existing work directory.
+// Returns the repo and true if successful, or nil and false if a fresh clone is needed.
+func (r *Runner) trySyncExisting(workDir string) (*repo.Repo, bool) {
+	info, err := os.Stat(workDir)
+	if err != nil || !info.IsDir() {
+		return nil, false
+	}
+
+	if repo.IsGitRepo(workDir) {
+		if taskRepo, err := r.syncGitRepo(workDir); err == nil {
+			return taskRepo, true
+		}
+		fmt.Fprintf(os.Stderr, "Warning: resync of %s failed, re-cloning\n", workDir)
+	}
+
+	// Not a git repo or sync failed; remove it.
+	_ = os.RemoveAll(workDir)
+	return nil, false
+}
+
+// syncGitRepo fetches, resets, and cleans an existing git repo.
+func (r *Runner) syncGitRepo(workDir string) (*repo.Repo, error) {
+	taskRepo := repo.Open(workDir)
+	if err := taskRepo.Fetch(); err != nil {
+		return nil, err
+	}
+	if err := taskRepo.ResetHard("origin/HEAD"); err != nil {
+		return nil, err
+	}
+	_ = taskRepo.Clean()
+	return taskRepo, nil
 }
 
 // Run executes the full task lifecycle: lock, branch, assemble, claude, test, lint, commit, push, record, move to review.
@@ -91,9 +173,19 @@ func (r *Runner) Run(taskName string) error {
 	}
 	defer func() { _ = lk.Release() }()
 
-	// Create and checkout branch
+	// Prepare work directory
+	wd := r.workDir(task)
+	taskRepo, err := r.prepareRepo(wd)
+	if err != nil {
+		return fmt.Errorf("preparing work directory: %w", err)
+	}
+
+	// Delete stale branch if it exists, then create fresh.
 	branch := task.BranchName()
-	if err := r.Repo.CreateBranch(branch); err != nil {
+	if taskRepo.BranchExists(branch) {
+		_ = taskRepo.DeleteBranch(branch)
+	}
+	if err := taskRepo.CreateBranch(branch); err != nil {
 		return fmt.Errorf("creating branch: %w", err)
 	}
 
@@ -119,7 +211,7 @@ func (r *Runner) Run(taskName string) error {
 		claudeFn = invokeClaude
 	}
 	runCfg := ClaudeRunConfig{
-		RepoDir:    r.Config.RepoDir,
+		RepoDir:    taskRepo.Dir,
 		Document:   doc,
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
@@ -129,7 +221,7 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	// Verify changes were made
-	hasChanges, err := r.Repo.HasChanges()
+	hasChanges, err := taskRepo.HasChanges()
 	if err != nil {
 		return fmt.Errorf("checking for changes: %w", err)
 	}
@@ -139,27 +231,27 @@ func (r *Runner) Run(taskName string) error {
 
 	// Run test and lint commands if configured
 	if r.TaskRunner != nil {
-		if err := r.TaskRunner.Run("test", r.Config.RepoDir); err != nil {
+		if err := r.TaskRunner.Run("test", taskRepo.Dir); err != nil {
 			return fmt.Errorf("test step failed: %w", err)
 		}
-		if err := r.TaskRunner.Run("lint", r.Config.RepoDir); err != nil {
+		if err := r.TaskRunner.Run("lint", taskRepo.Dir); err != nil {
 			return fmt.Errorf("lint step failed: %w", err)
 		}
 	}
 
 	// Commit and push
-	if err := r.Repo.AddAll(); err != nil {
+	if err := taskRepo.AddAll(); err != nil {
 		return fmt.Errorf("staging changes: %w", err)
 	}
 
-	sign := r.Repo.HasSigningKey()
+	sign := taskRepo.HasSigningKey()
 	commitMsg := "hydra: " + taskName
-	if err := r.Repo.Commit(commitMsg, sign); err != nil {
+	if err := taskRepo.Commit(commitMsg, sign); err != nil {
 		return fmt.Errorf("committing: %w", err)
 	}
 
 	// Record SHA -> task name
-	sha, err := r.Repo.LastCommitSHA()
+	sha, err := taskRepo.LastCommitSHA()
 	if err != nil {
 		return fmt.Errorf("getting commit SHA: %w", err)
 	}
@@ -168,7 +260,7 @@ func (r *Runner) Run(taskName string) error {
 		return fmt.Errorf("recording SHA: %w", err)
 	}
 
-	if err := r.Repo.Push(branch); err != nil {
+	if err := taskRepo.Push(branch); err != nil {
 		return fmt.Errorf("pushing: %w", err)
 	}
 
@@ -182,13 +274,8 @@ func (r *Runner) Run(taskName string) error {
 }
 
 // RunGroup executes all pending tasks in a group sequentially.
-// Between tasks, it checks out the base branch so each task starts from a clean state.
+// Each task gets its own cloned work directory.
 func (r *Runner) RunGroup(groupName string) error {
-	baseBranch, err := r.Repo.CurrentBranch()
-	if err != nil {
-		return fmt.Errorf("getting current branch: %w", err)
-	}
-
 	tasks, err := r.Design.PendingTasks()
 	if err != nil {
 		return fmt.Errorf("listing pending tasks: %w", err)
@@ -209,17 +296,10 @@ func (r *Runner) RunGroup(groupName string) error {
 		return groupTasks[i].Name < groupTasks[j].Name
 	})
 
-	for i, t := range groupTasks {
+	for _, t := range groupTasks {
 		taskRef := groupName + "/" + t.Name
 		if err := r.Run(taskRef); err != nil {
 			return fmt.Errorf("task %s: %w", taskRef, err)
-		}
-
-		// Reset to base branch between tasks (skip after last task).
-		if i < len(groupTasks)-1 {
-			if err := r.Repo.Checkout(baseBranch); err != nil {
-				return fmt.Errorf("checking out base branch: %w", err)
-			}
 		}
 	}
 

@@ -4,7 +4,9 @@ package repo
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -94,4 +96,116 @@ func (r *Repo) CurrentBranch() (string, error) {
 // LastCommitSHA returns the full SHA of the HEAD commit.
 func (r *Repo) LastCommitSHA() (string, error) {
 	return r.run("rev-parse", "HEAD")
+}
+
+// Fetch runs git fetch origin.
+func (r *Repo) Fetch() error {
+	_, err := r.run("fetch", "origin")
+	return err
+}
+
+// ResetHard runs git reset --hard to the given ref.
+func (r *Repo) ResetHard(ref string) error {
+	_, err := r.run("reset", "--hard", ref)
+	return err
+}
+
+// BranchExists returns true if the named branch exists locally.
+func (r *Repo) BranchExists(name string) bool {
+	_, err := r.run("rev-parse", "--verify", name)
+	return err == nil
+}
+
+// DeleteBranch deletes a local branch.
+func (r *Repo) DeleteBranch(name string) error {
+	_, err := r.run("branch", "-D", name)
+	return err
+}
+
+// IsGitRepo returns true if dir contains a .git directory or file.
+func IsGitRepo(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// Clean removes untracked files and directories.
+func (r *Repo) Clean() error {
+	_, err := r.run("clean", "-fd")
+	return err
+}
+
+// Rebase runs git rebase onto the given ref.
+func (r *Repo) Rebase(onto string) error {
+	_, err := r.run("rebase", onto)
+	return err
+}
+
+// RebaseContinue runs git rebase --continue.
+func (r *Repo) RebaseContinue() error {
+	_, err := r.run("rebase", "--continue")
+	return err
+}
+
+// RebaseAbort runs git rebase --abort.
+func (r *Repo) RebaseAbort() error {
+	_, err := r.run("rebase", "--abort")
+	return err
+}
+
+// HasConflicts returns true if there are unmerged paths.
+func (r *Repo) HasConflicts() (bool, error) {
+	out, err := r.run("status", "--porcelain")
+	if err != nil {
+		// During a rebase with conflicts, status still works.
+		return false, err
+	}
+	for line := range strings.SplitSeq(out, "\n") {
+		if len(line) >= 2 && (line[0] == 'U' || line[1] == 'U' ||
+			(line[0] == 'A' && line[1] == 'A') ||
+			(line[0] == 'D' && line[1] == 'D')) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// ConflictFiles returns the list of files with merge conflicts.
+func (r *Repo) ConflictFiles() ([]string, error) {
+	out, err := r.run("diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// ForcePushWithLease pushes the given branch with --force-with-lease.
+func (r *Repo) ForcePushWithLease(branch string) error {
+	_, err := r.run("push", "--force-with-lease", "origin", branch)
+	return err
+}
+
+// MergeFFOnly merges the given branch using fast-forward only.
+func (r *Repo) MergeFFOnly(branch string) error {
+	_, err := r.run("merge", "--ff-only", branch)
+	return err
+}
+
+// PushMain pushes the main branch to origin.
+func (r *Repo) PushMain() error {
+	_, err := r.run("push", "origin", "HEAD")
+	return err
+}
+
+// Log returns the last n commit messages in oneline format.
+func (r *Repo) Log(n int) (string, error) {
+	return r.run("log", "--oneline", fmt.Sprintf("-%d", n))
+}
+
+// IsAncestor returns true if ancestor is an ancestor of ref.
+func (r *Repo) IsAncestor(ancestor, ref string) bool {
+	_, err := r.run("merge-base", "--is-ancestor", ancestor, ref)
+	return err == nil
 }

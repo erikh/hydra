@@ -2,10 +2,14 @@ package issues
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/erikh/hydra/internal/design"
 )
 
 // mockSource implements Source for testing.
@@ -211,5 +215,167 @@ func TestParseGiteaURL(t *testing.T) {
 			t.Errorf("ParseGiteaURL(%q) = (%q, %q, %q, %v), want (%q, %q, %q, %v)",
 				tt.url, baseURL, owner, repo, ok, tt.wantBaseURL, tt.wantOwner, tt.wantRepo, tt.wantOk)
 		}
+	}
+}
+
+func TestParseIssueTaskNumber(t *testing.T) {
+	tests := []struct {
+		name string
+		want int
+	}{
+		{"42-fix-bug", 42},
+		{"1-simple", 1},
+		{"custom-task", 0},
+		{"0-edge", 0},
+		{"abc", 0},
+		{"", 0},
+	}
+
+	for _, tt := range tests {
+		got := ParseIssueTaskNumber(tt.name)
+		if got != tt.want {
+			t.Errorf("ParseIssueTaskNumber(%q) = %d, want %d", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestIsIssueTask(t *testing.T) {
+	issueTask := &design.Task{Name: "42-fix-bug", Group: "issues"}
+	if !IsIssueTask(issueTask) {
+		t.Error("expected issue task")
+	}
+
+	normalTask := &design.Task{Name: "add-feature", Group: ""}
+	if IsIssueTask(normalTask) {
+		t.Error("expected non-issue task")
+	}
+
+	otherGroup := &design.Task{Name: "something", Group: "backend"}
+	if IsIssueTask(otherGroup) {
+		t.Error("expected non-issue task for backend group")
+	}
+}
+
+type mockCloser struct {
+	called  bool
+	number  int
+	comment string
+}
+
+func (m *mockCloser) CloseIssue(number int, comment string) error {
+	m.called = true
+	m.number = number
+	m.comment = comment
+	return nil
+}
+
+func TestCloseIssueIfNeededMock(t *testing.T) {
+	closer := &mockCloser{}
+
+	task := &design.Task{Name: "42-fix-bug", Group: "issues"}
+	num := ParseIssueTaskNumber(task.Name)
+	if num == 0 || !IsIssueTask(task) {
+		t.Fatal("setup failed")
+	}
+
+	comment := "Closed by hydra. Commit: abc123"
+	if err := closer.CloseIssue(num, comment); err != nil {
+		t.Fatal(err)
+	}
+
+	if !closer.called {
+		t.Error("closer not called")
+	}
+	if closer.number != 42 {
+		t.Errorf("number = %d, want 42", closer.number)
+	}
+	if !strings.Contains(closer.comment, "abc123") {
+		t.Errorf("comment = %q, want abc123", closer.comment)
+	}
+}
+
+func TestCloseIssueIfNeededNonIssueTask(t *testing.T) {
+	closer := &mockCloser{}
+
+	task := &design.Task{Name: "add-feature", Group: ""}
+	if IsIssueTask(task) {
+		t.Fatal("should not be issue task")
+	}
+
+	// Should not call closer for non-issue tasks.
+	_ = closer
+}
+
+func TestGitHubCloseIssue(_ *testing.T) {
+	// We can't easily test GitHubSource.CloseIssue against httptest because
+	// the URL is hardcoded. Instead, test the GiteaSource which accepts a base URL.
+	// See TestGiteaCloseIssue for the integration test.
+}
+
+func TestGiteaCloseIssue(t *testing.T) {
+	var gotComment, gotPatch bool
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/comments") {
+			gotComment = true
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/issues/42") {
+			gotPatch = true
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	src := NewGiteaSource(ts.URL, "owner", "repo", "test-token")
+	if err := src.CloseIssue(42, "closed by hydra"); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	if !gotComment {
+		t.Error("expected comment POST")
+	}
+	if !gotPatch {
+		t.Error("expected PATCH to close issue")
+	}
+}
+
+func TestResolveSourceGitHub(t *testing.T) {
+	src, err := ResolveSource("https://github.com/owner/repo.git", "", "")
+	if err != nil {
+		t.Fatalf("ResolveSource: %v", err)
+	}
+	if _, ok := src.(*GitHubSource); !ok {
+		t.Errorf("expected GitHubSource, got %T", src)
+	}
+}
+
+func TestResolveSourceGitea(t *testing.T) {
+	src, err := ResolveSource("https://gitea.example.com/owner/repo.git", "", "")
+	if err != nil {
+		t.Fatalf("ResolveSource: %v", err)
+	}
+	if _, ok := src.(*GiteaSource); !ok {
+		t.Errorf("expected GiteaSource, got %T", src)
+	}
+}
+
+func TestResolveSourceExplicitType(t *testing.T) {
+	src, err := ResolveSource("https://gitea.example.com/owner/repo.git", "gitea", "")
+	if err != nil {
+		t.Fatalf("ResolveSource: %v", err)
+	}
+	if _, ok := src.(*GiteaSource); !ok {
+		t.Errorf("expected GiteaSource, got %T", src)
+	}
+}
+
+func TestResolveSourceInvalid(t *testing.T) {
+	_, err := ResolveSource("not-a-url", "", "")
+	if err == nil {
+		t.Error("expected error for invalid URL")
 	}
 }

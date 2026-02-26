@@ -113,6 +113,55 @@ func ParseGitHubURL(remoteURL string) (owner, repo string, ok bool) {
 	return "", "", false
 }
 
+// CloseIssue closes a GitHub issue with an optional comment.
+func (g *GitHubSource) CloseIssue(number int, comment string) error {
+	ctx := context.Background()
+
+	// Post comment if provided.
+	if comment != "" {
+		commentURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", g.Owner, g.Repo, number)
+		body := fmt.Sprintf(`{"body":%q}`, comment)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, commentURL, strings.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("Content-Type", "application/json")
+		if g.Token != "" {
+			req.Header.Set("Authorization", "Bearer "+g.Token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("posting comment: %w", err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	// Close the issue.
+	closeURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d", g.Owner, g.Repo, number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, closeURL, strings.NewReader(`{"state":"closed"}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	if g.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+g.Token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("closing issue: %w", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GitHub API returned status %d when closing issue #%d", resp.StatusCode, number)
+	}
+
+	return nil
+}
+
 func parseOwnerRepo(path string) (string, string, bool) {
 	path = strings.TrimSuffix(path, ".git")
 	path = strings.Trim(path, "/")

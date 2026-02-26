@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
@@ -32,6 +31,9 @@ func NewApp() *cli.App {
 			runCommand(),
 			runGroupCommand(),
 			editCommand(),
+			otherCommand(),
+			reviewCommand(),
+			mergeCommand(),
 			statusCommand(),
 			listCommand(),
 			milestoneCommand(),
@@ -105,10 +107,11 @@ func initCommand() *cli.Command {
 func editCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "edit",
-		Usage:     "Create a new task in the design directory",
+		Usage:     "Create or edit a task in the design directory",
 		ArgsUsage: "<task-name>",
-		Description: "Opens your editor to create a new task file. The editor is resolved " +
-			"from $VISUAL, then $EDITOR. The task name must not contain '/'.",
+		Description: "Opens your editor to create or edit a task file. If the task already " +
+			"exists, opens it in-place. The editor is resolved from $VISUAL, then $EDITOR. " +
+			"The task name must not contain '/'.",
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 1 {
 				return errors.New("usage: hydra edit <task-name>")
@@ -119,16 +122,142 @@ func editCommand() *cli.Command {
 				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
 			}
 
-			editor := os.Getenv("VISUAL")
-			if editor == "" {
-				editor = os.Getenv("EDITOR")
-			}
-			if editor == "" {
-				return errors.New("no editor configured: set $VISUAL or $EDITOR")
+			editor, err := resolveEditor()
+			if err != nil {
+				return err
 			}
 
 			taskName := c.Args().Get(0)
-			return design.EditNewTask(cfg.DesignDir, taskName, editor, os.Stdin, os.Stdout, os.Stderr)
+			return design.EditTask(cfg.DesignDir, taskName, editor, os.Stdin, os.Stdout, os.Stderr)
+		},
+	}
+}
+
+func resolveEditor() (string, error) {
+	editor := os.Getenv("VISUAL")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	if editor == "" {
+		return "", errors.New("no editor configured: set $VISUAL or $EDITOR")
+	}
+	return editor, nil
+}
+
+func otherCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "other",
+		Usage: "Manage miscellaneous files in the other/ directory",
+		Description: "CRUD operations for files in the design directory's other/ folder. " +
+			"These are supporting documents that aren't tasks.",
+		Subcommands: []*cli.Command{
+			{
+				Name:  "list",
+				Usage: "List files in other/",
+				Action: func(_ *cli.Context) error {
+					cfg, err := config.Discover()
+					if err != nil {
+						return fmt.Errorf("loading config: %w", err)
+					}
+					dd, err := design.NewDir(cfg.DesignDir)
+					if err != nil {
+						return err
+					}
+					files, err := dd.OtherFiles()
+					if err != nil {
+						return err
+					}
+					if len(files) == 0 {
+						fmt.Println("No files in other/.")
+						return nil
+					}
+					for _, f := range files {
+						fmt.Println(f)
+					}
+					return nil
+				},
+			},
+			{
+				Name:      "add",
+				Usage:     "Create a new file in other/",
+				ArgsUsage: "<name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra other add <name>")
+					}
+					cfg, err := config.Discover()
+					if err != nil {
+						return fmt.Errorf("loading config: %w", err)
+					}
+					editor, err := resolveEditor()
+					if err != nil {
+						return err
+					}
+					return design.AddOtherFile(cfg.DesignDir, c.Args().Get(0), editor, os.Stdin, os.Stdout, os.Stderr)
+				},
+			},
+			{
+				Name:      "view",
+				Usage:     "Print the content of a file in other/",
+				ArgsUsage: "<name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra other view <name>")
+					}
+					cfg, err := config.Discover()
+					if err != nil {
+						return fmt.Errorf("loading config: %w", err)
+					}
+					dd, err := design.NewDir(cfg.DesignDir)
+					if err != nil {
+						return err
+					}
+					content, err := dd.OtherContent(c.Args().Get(0))
+					if err != nil {
+						return err
+					}
+					fmt.Print(content)
+					return nil
+				},
+			},
+			{
+				Name:      "edit",
+				Usage:     "Edit an existing file in other/",
+				ArgsUsage: "<name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra other edit <name>")
+					}
+					cfg, err := config.Discover()
+					if err != nil {
+						return fmt.Errorf("loading config: %w", err)
+					}
+					editor, err := resolveEditor()
+					if err != nil {
+						return err
+					}
+					return design.EditOtherFile(cfg.DesignDir, c.Args().Get(0), editor, os.Stdin, os.Stdout, os.Stderr)
+				},
+			},
+			{
+				Name:      "rm",
+				Usage:     "Remove a file from other/",
+				ArgsUsage: "<name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra other rm <name>")
+					}
+					cfg, err := config.Discover()
+					if err != nil {
+						return fmt.Errorf("loading config: %w", err)
+					}
+					dd, err := design.NewDir(cfg.DesignDir)
+					if err != nil {
+						return err
+					}
+					return dd.RemoveOtherFile(c.Args().Get(0))
+				},
+			},
 		},
 	}
 }
@@ -340,7 +469,13 @@ func syncCommand() *cli.Command {
 			}
 
 			// Determine the source.
-			source, err := resolveIssueSource(cfg.SourceRepoURL, cmds)
+			apiType := ""
+			giteaURL := ""
+			if cmds != nil {
+				apiType = cmds.APIType
+				giteaURL = cmds.GiteaURL
+			}
+			source, err := issues.ResolveSource(cfg.SourceRepoURL, apiType, giteaURL)
 			if err != nil {
 				return err
 			}
@@ -356,57 +491,151 @@ func syncCommand() *cli.Command {
 	}
 }
 
-func resolveIssueSource(repoURL string, cmds *taskrun.Commands) (issues.Source, error) {
-	apiType := ""
-	giteaURL := ""
-	giteaToken := ""
-	if cmds != nil {
-		apiType = cmds.APIType
-		giteaURL = cmds.GiteaURL
-	}
+// stateOps holds the per-state runner operations used by stateCommand.
+type stateOps struct {
+	list func(r *runner.Runner) error
+	view func(r *runner.Runner, name string) error
+	edit func(r *runner.Runner, name, editor string) error
+	rm   func(r *runner.Runner, name string) error
+	run  func(r *runner.Runner, name string) error
+}
 
-	// Explicit api_type override.
-	if apiType == "github" {
-		owner, repo, ok := issues.ParseGitHubURL(repoURL)
-		if !ok {
-			return nil, fmt.Errorf("cannot parse GitHub owner/repo from %q", repoURL)
-		}
-		return issues.NewGitHubSource(owner, repo), nil
+// stateCommand builds a CLI command with list/view/edit/rm/run subcommands
+// for a given task state (review, merge, etc.).
+func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.Command {
+	return &cli.Command{
+		Name:        name,
+		Usage:       usage,
+		Description: description,
+		Subcommands: []*cli.Command{
+			{
+				Name:  "list",
+				Usage: "List tasks in " + name + " state",
+				Action: func(_ *cli.Context) error {
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return ops.list(r)
+				},
+			},
+			{
+				Name:      "view",
+				Usage:     "Print task content from " + name + " state",
+				ArgsUsage: "<task-name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return fmt.Errorf("usage: hydra %s view <task-name>", name)
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return ops.view(r, c.Args().Get(0))
+				},
+			},
+			{
+				Name:      "edit",
+				Usage:     "Open a task in " + name + " state in the editor",
+				ArgsUsage: "<task-name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return fmt.Errorf("usage: hydra %s edit <task-name>", name)
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					editor, err := resolveEditor()
+					if err != nil {
+						return err
+					}
+					return ops.edit(r, c.Args().Get(0), editor)
+				},
+			},
+			{
+				Name:      "rm",
+				Usage:     "Move a task from " + name + " to abandoned",
+				ArgsUsage: "<task-name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return fmt.Errorf("usage: hydra %s rm <task-name>", name)
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return ops.rm(r, c.Args().Get(0))
+				},
+			},
+			{
+				Name:      "run",
+				Usage:     runUsage,
+				ArgsUsage: "<task-name>",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "auto-accept",
+						Aliases: []string{"y"},
+						Usage:   "Auto-accept all tool calls without prompting",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return fmt.Errorf("usage: hydra %s run <task-name>", name)
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					if c.Bool("auto-accept") {
+						r.AutoAccept = true
+					}
+					return ops.run(r, c.Args().Get(0))
+				},
+			},
+		},
 	}
-	if apiType == "gitea" {
-		baseURL := giteaURL
-		if baseURL == "" {
-			var owner, repo string
-			var ok bool
-			baseURL, owner, repo, ok = issues.ParseGiteaURL(repoURL)
-			if !ok {
-				return nil, fmt.Errorf("cannot parse Gitea URL from %q", repoURL)
-			}
-			return issues.NewGiteaSource(baseURL, owner, repo, giteaToken), nil
-		}
-		// Parse owner/repo from URL even when base URL is overridden.
-		_, owner, repo, ok := issues.ParseGiteaURL(repoURL)
-		if !ok {
-			return nil, fmt.Errorf("cannot parse owner/repo from %q", repoURL)
-		}
-		return issues.NewGiteaSource(baseURL, owner, repo, giteaToken), nil
-	}
+}
 
-	// Auto-detect: if URL contains github.com, use GitHub.
-	if strings.Contains(repoURL, "github.com") {
-		owner, repo, ok := issues.ParseGitHubURL(repoURL)
-		if !ok {
-			return nil, fmt.Errorf("cannot parse GitHub owner/repo from %q", repoURL)
-		}
-		return issues.NewGitHubSource(owner, repo), nil
+// newRunner creates a runner from discovered config.
+func newRunner() (*runner.Runner, error) {
+	cfg, err := config.Discover()
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
+	return runner.New(cfg)
+}
 
-	// Default to Gitea for non-GitHub hosts.
-	baseURL, owner, repo, ok := issues.ParseGiteaURL(repoURL)
-	if !ok {
-		return nil, fmt.Errorf("cannot determine issue source from %q; set api_type in hydra.yml", repoURL)
-	}
-	return issues.NewGiteaSource(baseURL, owner, repo, giteaToken), nil
+func reviewCommand() *cli.Command {
+	return stateCommand(
+		"review",
+		"Manage and run review sessions on completed tasks",
+		"CRUD operations and interactive review sessions for tasks in the review state.",
+		"Run an interactive review session",
+		stateOps{
+			list: (*runner.Runner).ReviewList,
+			view: (*runner.Runner).ReviewView,
+			edit: (*runner.Runner).ReviewEdit,
+			rm:   (*runner.Runner).ReviewRemove,
+			run:  (*runner.Runner).Review,
+		},
+	)
+}
+
+func mergeCommand() *cli.Command {
+	return stateCommand(
+		"merge",
+		"Manage and run merge workflows on reviewed tasks",
+		"CRUD operations and merge workflow for tasks in review or merge state.",
+		"Run the merge workflow (rebase, test, merge, push)",
+		stateOps{
+			list: (*runner.Runner).MergeList,
+			view: (*runner.Runner).MergeView,
+			edit: (*runner.Runner).MergeEdit,
+			rm:   (*runner.Runner).MergeRemove,
+			run:  (*runner.Runner).Merge,
+		},
+	)
 }
 
 func milestoneCommand() *cli.Command {

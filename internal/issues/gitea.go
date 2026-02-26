@@ -90,6 +90,53 @@ func (g *GiteaSource) FetchOpenIssues(ctx context.Context, labels []string) ([]I
 	return result, nil
 }
 
+// CloseIssue closes a Gitea issue with an optional comment.
+func (g *GiteaSource) CloseIssue(number int, comment string) error {
+	ctx := context.Background()
+
+	// Post comment if provided.
+	if comment != "" {
+		commentURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/issues/%d/comments", g.BaseURL, g.Owner, g.Repo, number)
+		body := fmt.Sprintf(`{"body":%q}`, comment)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, commentURL, strings.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if g.Token != "" {
+			req.Header.Set("Authorization", "token "+g.Token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("posting comment: %w", err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	// Close the issue.
+	closeURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/issues/%d", g.BaseURL, g.Owner, g.Repo, number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, closeURL, strings.NewReader(`{"state":"closed"}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if g.Token != "" {
+		req.Header.Set("Authorization", "token "+g.Token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("closing issue: %w", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("gitea API returned status %d when closing issue #%d", resp.StatusCode, number)
+	}
+
+	return nil
+}
+
 // ParseGiteaURL extracts the base URL, owner, and repo from a non-GitHub remote URL.
 // Supports https://host/owner/repo and git@host:owner/repo formats.
 func ParseGiteaURL(remoteURL string) (baseURL, owner, repo string, ok bool) {

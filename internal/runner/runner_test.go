@@ -14,14 +14,14 @@ import (
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
 	"github.com/erikh/hydra/internal/lock"
+	"github.com/erikh/hydra/internal/repo"
 )
 
 // testEnv sets up the full environment needed for runner tests:
-// a base dir with .hydra/, a design dir with tasks, and a git repo with a remote.
+// a base dir with .hydra/, a design dir with tasks, and a bare remote.
 type testEnv struct {
 	BaseDir   string
 	DesignDir string
-	RepoDir   string
 	BareDir   string
 	Config    *config.Config
 }
@@ -56,29 +56,20 @@ func setupTestEnv(t *testing.T) *testEnv {
 	// Create state dir for record.json.
 	mkdirAll(t, filepath.Join(designDir, "state"))
 
-	// Create bare remote.
+	// Create bare remote with an initial commit so clones have content.
 	bareDir := filepath.Join(t.TempDir(), "remote.git")
-	gitRun(t, "init", "--bare", bareDir)
+	setupDir := filepath.Join(t.TempDir(), "setup-repo")
+	mkdirAll(t, setupDir)
+	gitRun(t, "init", setupDir)
+	gitRun(t, "-C", setupDir, "config", "user.email", "test@test.com")
+	gitRun(t, "-C", setupDir, "config", "user.name", "Test")
+	gitRun(t, "-C", setupDir, "config", "commit.gpgsign", "false")
+	writeFile(t, filepath.Join(setupDir, "README.md"), "# Test")
+	gitRun(t, "-C", setupDir, "add", "-A")
+	gitRun(t, "-C", setupDir, "commit", "-m", "initial")
 
-	// Create repo with initial commit and remote.
-	repoDir := filepath.Join(base, "repo")
-	mkdirAll(t, repoDir)
-	gitRun(t, "init", repoDir)
-	gitRun(t, "-C", repoDir, "config", "user.email", "test@test.com")
-	gitRun(t, "-C", repoDir, "config", "user.name", "Test")
-	gitRun(t, "-C", repoDir, "config", "commit.gpgsign", "false")
-	writeFile(t, filepath.Join(repoDir, "README.md"), "# Test")
-	gitRun(t, "-C", repoDir, "add", "-A")
-	gitRun(t, "-C", repoDir, "commit", "-m", "initial")
-	gitRun(t, "-C", repoDir, "remote", "add", "origin", bareDir)
-
-	// Push to whatever the default branch is.
-	out, err := exec.CommandContext(context.Background(), "git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
-	if err != nil {
-		t.Fatalf("getting branch: %v", err)
-	}
-	branch := strings.TrimSpace(string(out))
-	gitRun(t, "-C", repoDir, "push", "-u", "origin", branch)
+	// Create bare clone from the setup repo.
+	gitRun(t, "clone", "--bare", setupDir, bareDir)
 
 	// Create .hydra dir and config.
 	hydraDir := filepath.Join(base, ".hydra")
@@ -87,7 +78,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	cfg := &config.Config{
 		SourceRepoURL: bareDir,
 		DesignDir:     designDir,
-		RepoDir:       repoDir,
+		RepoDir:       filepath.Join(base, "repo"), // kept for compatibility but unused by runner
 	}
 	if err := cfg.Save(base); err != nil {
 		t.Fatal(err)
@@ -96,7 +87,6 @@ func setupTestEnv(t *testing.T) *testEnv {
 	return &testEnv{
 		BaseDir:   base,
 		DesignDir: designDir,
-		RepoDir:   repoDir,
 		BareDir:   bareDir,
 		Config:    cfg,
 	}
@@ -147,6 +137,11 @@ func mockClaudeCapture(captured *string) ClaudeFunc {
 	}
 }
 
+// workDirForTask returns the expected work directory for "add-feature" in tests.
+func workDirForTask(baseDir string) string {
+	return filepath.Join(baseDir, "work", "add-feature")
+}
+
 func TestRunFullWorkflow(t *testing.T) {
 	env := setupTestEnv(t)
 
@@ -162,8 +157,9 @@ func TestRunFullWorkflow(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify branch was created.
-	out, err := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
+	// Verify work directory was created and branch exists.
+	wd := workDirForTask(env.BaseDir)
+	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("getting branch: %v", err)
 	}
@@ -173,12 +169,12 @@ func TestRunFullWorkflow(t *testing.T) {
 	}
 
 	// Verify the generated file was committed.
-	if _, err := os.Stat(filepath.Join(env.RepoDir, "generated.go")); err != nil {
-		t.Error("generated.go not found in repo")
+	if _, err := os.Stat(filepath.Join(wd, "generated.go")); err != nil {
+		t.Error("generated.go not found in work dir")
 	}
 
 	// Verify no uncommitted changes remain.
-	statusOut, _ := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "status", "--porcelain").Output() //nolint:gosec // test
+	statusOut, _ := exec.CommandContext(context.Background(), "git", "-C", wd, "status", "--porcelain").Output() //nolint:gosec // test
 	if strings.TrimSpace(string(statusOut)) != "" {
 		t.Errorf("uncommitted changes remain: %s", statusOut)
 	}
@@ -208,6 +204,30 @@ func TestRunFullWorkflow(t *testing.T) {
 	}
 }
 
+func TestRunCreatesWorkDir(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	wd := workDirForTask(env.BaseDir)
+	if _, err := os.Stat(wd); err != nil {
+		t.Errorf("work dir not created: %v", err)
+	}
+	if !repo.IsGitRepo(wd) {
+		t.Error("work dir is not a git repo")
+	}
+}
+
 func TestRunGroupedTask(t *testing.T) {
 	env := setupTestEnv(t)
 
@@ -223,10 +243,33 @@ func TestRunGroupedTask(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	out, _ := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
+	// Grouped tasks go in work/{group}/{name}.
+	wd := filepath.Join(env.BaseDir, "work", "backend", "add-api")
+	out, _ := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
 	branch := strings.TrimSpace(string(out))
 	if branch != "hydra/backend/add-api" {
 		t.Errorf("branch = %q, want hydra/backend/add-api", branch)
+	}
+}
+
+func TestRunGroupedTaskWorkDir(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("backend/add-api"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	wd := filepath.Join(env.BaseDir, "work", "backend", "add-api")
+	if _, err := os.Stat(wd); err != nil {
+		t.Errorf("grouped work dir not created: %v", err)
 	}
 }
 
@@ -381,8 +424,10 @@ func TestRunCommitMessage(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
+	wd := workDirForTask(env.BaseDir)
+
 	// Check the commit message.
-	out, err := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "log", "-1", "--format=%s").Output() //nolint:gosec // test
+	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "log", "-1", "--format=%s").Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
@@ -437,16 +482,7 @@ func TestRunTaskStateAfterMultipleRuns(t *testing.T) {
 		t.Fatalf("first Run: %v", err)
 	}
 
-	// Checkout back to the original branch so we can create another.
-	out, _ := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "branch", "--list", "main", "master").Output() //nolint:gosec // test
-	branches := strings.Fields(strings.ReplaceAll(string(out), "*", ""))
-	if len(branches) > 0 {
-		if err := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "checkout", branches[0]).Run(); err != nil { //nolint:gosec // test
-			t.Fatalf("checkout: %v", err)
-		}
-	}
-
-	// Run second task.
+	// Run second task (each gets its own work dir, no branch conflicts).
 	if err := r.Run("another-task"); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -549,7 +585,8 @@ func TestRunRecordsSHA(t *testing.T) {
 	}
 
 	// Verify the recorded SHA matches the actual commit.
-	out, err := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "rev-parse", "HEAD").Output() //nolint:gosec // test
+	wd := workDirForTask(env.BaseDir)
+	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "HEAD").Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git rev-parse: %v", err)
 	}
@@ -693,5 +730,338 @@ func TestRunGroupEmptyError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no pending tasks") {
 		t.Errorf("error = %q, want no pending tasks message", err)
+	}
+}
+
+func TestPrepareRepoFreshClone(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	wd := filepath.Join(env.BaseDir, "work", "fresh-task")
+	taskRepo, err := r.prepareRepo(wd)
+	if err != nil {
+		t.Fatalf("prepareRepo: %v", err)
+	}
+	if !repo.IsGitRepo(taskRepo.Dir) {
+		t.Error("expected git repo after fresh clone")
+	}
+}
+
+func TestPrepareRepoExistingGitDir(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	wd := filepath.Join(env.BaseDir, "work", "existing-task")
+
+	// First clone.
+	_, err = r.prepareRepo(wd)
+	if err != nil {
+		t.Fatalf("first prepareRepo: %v", err)
+	}
+
+	// Add a file to make it dirty.
+	writeFile(t, filepath.Join(wd, "dirty.txt"), "dirty")
+
+	// Second prepare should fetch + reset.
+	taskRepo, err := r.prepareRepo(wd)
+	if err != nil {
+		t.Fatalf("second prepareRepo: %v", err)
+	}
+	if !repo.IsGitRepo(taskRepo.Dir) {
+		t.Error("expected git repo after sync")
+	}
+
+	// Dirty file should be gone after reset.
+	if _, err := os.Stat(filepath.Join(wd, "dirty.txt")); !os.IsNotExist(err) {
+		t.Error("dirty file should be gone after reset")
+	}
+}
+
+func TestPrepareRepoNotGitDir(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	wd := filepath.Join(env.BaseDir, "work", "not-git")
+	mkdirAll(t, wd)
+	writeFile(t, filepath.Join(wd, "random.txt"), "not a git repo")
+
+	taskRepo, err := r.prepareRepo(wd)
+	if err != nil {
+		t.Fatalf("prepareRepo: %v", err)
+	}
+	if !repo.IsGitRepo(taskRepo.Dir) {
+		t.Error("expected git repo after re-clone")
+	}
+}
+
+func TestRunGroupNoBaseBranch(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	callCount := 0
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		callCount++
+		fname := fmt.Sprintf("generated-%d.go", callCount)
+		return os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600)
+	}
+	r.BaseDir = env.BaseDir
+
+	// RunGroup works without needing to track a base branch.
+	if err := r.RunGroup("backend"); err != nil {
+		t.Fatalf("RunGroup: %v", err)
+	}
+
+	// Each task should have its own work dir.
+	apiWD := filepath.Join(env.BaseDir, "work", "backend", "add-api")
+	dbWD := filepath.Join(env.BaseDir, "work", "backend", "add-db")
+
+	if _, err := os.Stat(apiWD); err != nil {
+		t.Error("add-api work dir not created")
+	}
+	if _, err := os.Stat(dbWD); err != nil {
+		t.Error("add-db work dir not created")
+	}
+}
+
+func TestFindTaskByState(t *testing.T) {
+	dir := t.TempDir()
+	mkdirAll(t, filepath.Join(dir, "tasks"))
+	mkdirAll(t, filepath.Join(dir, "state", "review"))
+	mkdirAll(t, filepath.Join(dir, "state", "merge"))
+	mkdirAll(t, filepath.Join(dir, "state", "completed"))
+
+	writeFile(t, filepath.Join(dir, "state", "review", "task-a.md"), "Task A in review")
+	writeFile(t, filepath.Join(dir, "state", "merge", "task-b.md"), "Task B in merge")
+	writeFile(t, filepath.Join(dir, "state", "completed", "task-c.md"), "Task C completed")
+
+	dd, err := design.NewDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find in review.
+	task, err := dd.FindTaskByState("task-a", design.StateReview)
+	if err != nil {
+		t.Fatalf("FindTaskByState review: %v", err)
+	}
+	if task.Name != "task-a" {
+		t.Errorf("Name = %q, want task-a", task.Name)
+	}
+
+	// Find in merge.
+	task, err = dd.FindTaskByState("task-b", design.StateMerge)
+	if err != nil {
+		t.Fatalf("FindTaskByState merge: %v", err)
+	}
+	if task.Name != "task-b" {
+		t.Errorf("Name = %q, want task-b", task.Name)
+	}
+
+	// Find in completed.
+	task, err = dd.FindTaskByState("task-c", design.StateCompleted)
+	if err != nil {
+		t.Fatalf("FindTaskByState completed: %v", err)
+	}
+	if task.Name != "task-c" {
+		t.Errorf("Name = %q, want task-c", task.Name)
+	}
+}
+
+func TestFindTaskByStateNotFound(t *testing.T) {
+	dir := t.TempDir()
+	mkdirAll(t, filepath.Join(dir, "tasks"))
+	mkdirAll(t, filepath.Join(dir, "state", "review"))
+
+	dd, err := design.NewDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = dd.FindTaskByState("nonexistent", design.StateReview)
+	if err == nil {
+		t.Fatal("expected error for missing task")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want not found", err)
+	}
+}
+
+func TestReviewWorkflow(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// First run the task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Now run review (with mock Claude that makes changes).
+	reviewCallCount := 0
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		reviewCallCount++
+		return os.WriteFile(filepath.Join(cfg.RepoDir, "review-fix.go"), []byte("package main\n// fixed"), 0o600)
+	}
+
+	if err := r.Review("add-feature"); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+
+	if reviewCallCount != 1 {
+		t.Errorf("expected 1 review call, got %d", reviewCallCount)
+	}
+
+	// Task should still be in review.
+	dd, _ := design.NewDir(env.DesignDir)
+	task, err := dd.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Errorf("task should still be in review: %v", err)
+	}
+	if task == nil {
+		t.Error("task not found in review state")
+	}
+}
+
+func TestReviewNoChanges(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Review with no changes.
+	r.Claude = mockClaudeNoChanges
+
+	if err := r.Review("add-feature"); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+
+	// Task should still be in review.
+	dd, _ := design.NewDir(env.DesignDir)
+	_, err = dd.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Error("task should still be in review after no-change review")
+	}
+}
+
+func TestMergeWorkflow(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Merge the task.
+	r.Claude = mockClaudeNoChanges // no conflicts expected
+	if err := r.Merge("add-feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Task should be in completed state.
+	dd, _ := design.NewDir(env.DesignDir)
+	_, err = dd.FindTaskByState("add-feature", design.StateCompleted)
+	if err != nil {
+		t.Errorf("task should be completed: %v", err)
+	}
+}
+
+func TestMergeFromReviewState(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	r.Claude = mockClaudeNoChanges
+	if err := r.Merge("add-feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	dd, _ := design.NewDir(env.DesignDir)
+	_, err = dd.FindTaskByState("add-feature", design.StateCompleted)
+	if err != nil {
+		t.Errorf("task should be completed after merge: %v", err)
+	}
+}
+
+func TestMergeCRUDOperatesOnMergeState(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Move a task to merge state manually.
+	dd, _ := design.NewDir(env.DesignDir)
+	task, err := dd.FindTask("add-feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dd.MoveTask(task, design.StateMerge); err != nil {
+		t.Fatal(err)
+	}
+
+	// MergeView should find it.
+	if err := r.MergeView("add-feature"); err != nil {
+		t.Errorf("MergeView: %v", err)
+	}
+
+	// MergeRemove should move to abandoned.
+	if err := r.MergeRemove("add-feature"); err != nil {
+		t.Errorf("MergeRemove: %v", err)
+	}
+
+	_, err = dd.FindTaskByState("add-feature", design.StateAbandoned)
+	if err != nil {
+		t.Error("task should be abandoned after MergeRemove")
 	}
 }

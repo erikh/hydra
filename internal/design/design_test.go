@@ -686,6 +686,25 @@ func writeMockEditorFailing(t *testing.T) string {
 	return f.Name()
 }
 
+func writeMockEditorAppend(t *testing.T, text string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "mock-editor-*.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' '%s' >> \"$1\"\n", text)
+	if _, err := f.WriteString(script); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(f.Name(), 0o755); err != nil { //nolint:gosec // must be executable
+		t.Fatal(err)
+	}
+	return f.Name()
+}
+
 func writeMockEditorNoop(t *testing.T) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "mock-editor-*.sh")
@@ -705,13 +724,13 @@ func writeMockEditorNoop(t *testing.T) string {
 	return f.Name()
 }
 
-func TestEditNewTask(t *testing.T) {
+func TestEditTaskNew(t *testing.T) {
 	dir := t.TempDir()
 	editor := writeMockEditor(t, "task content")
 
-	err := EditNewTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
+	err := EditTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
 	if err != nil {
-		t.Fatalf("EditNewTask: %v", err)
+		t.Fatalf("EditTask: %v", err)
 	}
 
 	data, err := os.ReadFile(filepath.Join(dir, "tasks", "my-task.md")) //nolint:gosec // test
@@ -723,11 +742,33 @@ func TestEditNewTask(t *testing.T) {
 	}
 }
 
-func TestEditNewTaskEmptyFile(t *testing.T) {
+func TestEditTaskExisting(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(dir, "tasks"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "my-task.md"), []byte("existing content"), 0o600))
+
+	// Mock editor that appends text to the file.
+	editor := writeMockEditorAppend(t, "\nupdated")
+
+	err := EditTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("EditTask existing: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "tasks", "my-task.md")) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading task file: %v", err)
+	}
+	if string(data) != "existing content\nupdated" {
+		t.Errorf("task content = %q, want %q", string(data), "existing content\nupdated")
+	}
+}
+
+func TestEditTaskNewEmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	editor := writeMockEditorNoop(t)
 
-	err := EditNewTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
+	err := EditTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error for empty file")
 	}
@@ -741,11 +782,11 @@ func TestEditNewTaskEmptyFile(t *testing.T) {
 	}
 }
 
-func TestEditNewTaskEditorFails(t *testing.T) {
+func TestEditTaskEditorFails(t *testing.T) {
 	dir := t.TempDir()
 	editor := writeMockEditorFailing(t)
 
-	err := EditNewTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
+	err := EditTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error when editor fails")
 	}
@@ -756,32 +797,43 @@ func TestEditNewTaskEditorFails(t *testing.T) {
 	}
 }
 
-func TestEditNewTaskAlreadyExists(t *testing.T) {
-	dir := t.TempDir()
-	must(t, os.MkdirAll(filepath.Join(dir, "tasks"), 0o750))
-	must(t, os.WriteFile(filepath.Join(dir, "tasks", "my-task.md"), []byte("existing"), 0o600))
-
-	editor := writeMockEditor(t, "new content")
-
-	err := EditNewTask(dir, "my-task", editor, nil, io.Discard, io.Discard)
-	if err == nil {
-		t.Fatal("expected error when task already exists")
-	}
-	if !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("error = %q, want already exists", err)
-	}
-}
-
-func TestEditNewTaskSlashRejected(t *testing.T) {
+func TestEditTaskSlashRejected(t *testing.T) {
 	dir := t.TempDir()
 	editor := writeMockEditor(t, "content")
 
-	err := EditNewTask(dir, "group/my-task", editor, nil, io.Discard, io.Discard)
+	err := EditTask(dir, "group/my-task", editor, nil, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error for task name with slash")
 	}
 	if !strings.Contains(err.Error(), "/") {
 		t.Errorf("error = %q, want message about slash", err)
+	}
+}
+
+func TestRunEditorHelper(t *testing.T) {
+	// Test successful editor run.
+	tmpFile := filepath.Join(t.TempDir(), "test.md")
+	must(t, os.WriteFile(tmpFile, []byte("original"), 0o600))
+
+	editor := writeMockEditor(t, "replaced")
+	err := runEditor(editor, tmpFile, nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("runEditor: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpFile) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "replaced" {
+		t.Errorf("content = %q, want %q", string(data), "replaced")
+	}
+
+	// Test failing editor.
+	failEditor := writeMockEditorFailing(t)
+	err = runEditor(failEditor, tmpFile, nil, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("expected error from failing editor")
 	}
 }
 
