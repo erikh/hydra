@@ -139,16 +139,12 @@ func (r *Runner) trySyncExisting(workDir string) (*repo.Repo, bool) {
 	return nil, false
 }
 
-// syncGitRepo fetches, resets, and cleans an existing git repo.
+// syncGitRepo fetches an existing git repo without resetting the working tree.
 func (r *Runner) syncGitRepo(workDir string) (*repo.Repo, error) {
 	taskRepo := repo.Open(workDir)
 	if err := taskRepo.Fetch(); err != nil {
 		return nil, err
 	}
-	if err := taskRepo.ResetHard("origin/HEAD"); err != nil {
-		return nil, err
-	}
-	_ = taskRepo.Clean()
 	return taskRepo, nil
 }
 
@@ -180,13 +176,16 @@ func (r *Runner) Run(taskName string) error {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
-	// Delete stale branch if it exists, then create fresh.
+	// Check out existing task branch, or create a new one.
 	branch := task.BranchName()
 	if taskRepo.BranchExists(branch) {
-		_ = taskRepo.DeleteBranch(branch)
-	}
-	if err := taskRepo.CreateBranch(branch); err != nil {
-		return fmt.Errorf("creating branch: %w", err)
+		if err := taskRepo.Checkout(branch); err != nil {
+			return fmt.Errorf("checking out branch: %w", err)
+		}
+	} else {
+		if err := taskRepo.CreateBranch(branch); err != nil {
+			return fmt.Errorf("creating branch: %w", err)
+		}
 	}
 
 	// Read task content and assemble document

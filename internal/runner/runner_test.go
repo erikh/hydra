@@ -780,7 +780,7 @@ func TestPrepareRepoExistingGitDir(t *testing.T) {
 	// Add a file to make it dirty.
 	writeFile(t, filepath.Join(wd, "dirty.txt"), "dirty")
 
-	// Second prepare should fetch + reset.
+	// Second prepare should fetch without resetting the working tree.
 	taskRepo, err := r.prepareRepo(wd)
 	if err != nil {
 		t.Fatalf("second prepareRepo: %v", err)
@@ -789,9 +789,9 @@ func TestPrepareRepoExistingGitDir(t *testing.T) {
 		t.Error("expected git repo after sync")
 	}
 
-	// Dirty file should be gone after reset.
-	if _, err := os.Stat(filepath.Join(wd, "dirty.txt")); !os.IsNotExist(err) {
-		t.Error("dirty file should be gone after reset")
+	// Dirty file should still be present (no reset/clean).
+	if _, err := os.Stat(filepath.Join(wd, "dirty.txt")); os.IsNotExist(err) {
+		t.Error("dirty file should be preserved after fetch-only sync")
 	}
 }
 
