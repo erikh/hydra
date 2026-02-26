@@ -101,7 +101,7 @@ hydra run issues/42-fix-bug
 # Review the implementation — Claude checks its own work
 hydra review run 42-fix-bug
 
-# Merge — rebase onto main, run tests, fast-forward merge, push, close issue
+# Merge — rebase onto main, run tests, rebase into main, push, close issue
 hydra merge run 42-fix-bug
 ```
 
@@ -174,7 +174,7 @@ hydra merge rm <task-name>         # Move task to abandoned
 hydra merge run <task-name>        # Run merge workflow
 ```
 
-`hydra merge run` performs: rebase onto `origin/main`, resolve conflicts via Claude if needed, run tests/lint, fast-forward merge, push, record SHA, move to completed, and close the remote issue if applicable.
+`hydra merge run` performs: rebase onto `origin/main`, resolve conflicts via Claude if needed, run tests/lint, rebase task branch into main, push, record SHA, move to completed, and close the remote issue if applicable.
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 

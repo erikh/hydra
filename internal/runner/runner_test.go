@@ -1037,6 +1037,44 @@ func TestMergeWorkflow(t *testing.T) {
 	}
 }
 
+func TestMergeUsesRebase(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Merge the task.
+	r.Claude = mockClaudeNoChanges
+	if err := r.Merge("add-feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Verify main was updated via rebase (no merge commits).
+	wd := workDirForTask(env.BaseDir)
+	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "log", "--oneline", "--merges", "main").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("expected no merge commits on main, got: %s", out)
+	}
+
+	// Verify the task branch commit is an ancestor of main.
+	err = exec.CommandContext(context.Background(), "git", "-C", wd, "merge-base", "--is-ancestor", "hydra/add-feature", "main").Run() //nolint:gosec // test
+	if err != nil {
+		t.Error("task branch should be an ancestor of main after rebase")
+	}
+}
+
 func TestMergeFromReviewState(t *testing.T) {
 	env := setupTestEnv(t)
 

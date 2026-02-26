@@ -14,7 +14,7 @@ import (
 	"github.com/erikh/hydra/internal/repo"
 )
 
-// Merge runs the merge workflow: rebase onto origin/main, test, ff-merge, push.
+// Merge runs the merge workflow: rebase onto origin/main, test, rebase into main, push.
 // Accepts tasks in review or merge state (merge state for retries).
 func (r *Runner) Merge(taskName string) error {
 	baseDir := r.BaseDir
@@ -64,8 +64,8 @@ func (r *Runner) Merge(taskName string) error {
 		return err
 	}
 
-	// Fast-forward merge and push.
-	defaultBranch, err := r.ffMergeAndPush(taskRepo, branch)
+	// Rebase task branch into main and push.
+	defaultBranch, err := r.rebaseAndPush(taskRepo, branch)
 	if err != nil {
 		return err
 	}
@@ -200,8 +200,8 @@ func (r *Runner) invokeClaudeForRepo(repoDir, document string) error {
 	})
 }
 
-// ffMergeAndPush performs the fast-forward merge onto main and pushes.
-func (r *Runner) ffMergeAndPush(taskRepo *repo.Repo, branch string) (string, error) {
+// rebaseAndPush checks out the default branch, rebases the task branch into it, and pushes.
+func (r *Runner) rebaseAndPush(taskRepo *repo.Repo, branch string) (string, error) {
 	defaultBranch, err := r.detectDefaultBranch(taskRepo)
 	if err != nil {
 		return "", fmt.Errorf("detecting default branch: %w", err)
@@ -212,12 +212,11 @@ func (r *Runner) ffMergeAndPush(taskRepo *repo.Repo, branch string) (string, err
 	}
 
 	if err := taskRepo.Fetch(); err != nil {
-		return "", fmt.Errorf("fetching before merge: %w", err)
+		return "", fmt.Errorf("fetching before rebase: %w", err)
 	}
-	_ = taskRepo.ResetHard("origin/" + defaultBranch)
 
-	if err := taskRepo.MergeFFOnly(branch); err != nil {
-		return "", fmt.Errorf("fast-forward merge failed: %w", err)
+	if err := taskRepo.Rebase(branch); err != nil {
+		return "", fmt.Errorf("rebase failed: %w", err)
 	}
 
 	if err := taskRepo.PushMain(); err != nil {
