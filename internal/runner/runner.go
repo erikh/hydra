@@ -63,13 +63,17 @@ func New(cfg *config.Config) (*Runner, error) {
 	return r, nil
 }
 
+// defaultHydraYml is the placeholder content for a new hydra.yml.
+const defaultHydraYml = "commands:\n  # lint: \"golangci-lint run ./...\"\n  # test: \"go test ./... -count=1\"\n"
+
 // loadHydraYml loads hydra.yml and resolves issue closer.
+// If the file does not exist, it is created with placeholder content.
 func (r *Runner) loadHydraYml(cfg *config.Config) error {
 	ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
 	if !fileExists(ymlPath) {
-		// No hydra.yml — try resolving issue closer without overrides.
-		r.resolveIssueCloser(cfg.SourceRepoURL, "", "")
-		return nil
+		if err := os.WriteFile(ymlPath, []byte(defaultHydraYml), 0o600); err != nil {
+			return fmt.Errorf("creating hydra.yml: %w", err)
+		}
 	}
 
 	cmds, err := taskrun.Load(ymlPath)

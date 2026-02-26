@@ -30,7 +30,8 @@ func commitInstructions(sign bool, commands map[string]string) string {
 	}
 
 	b.WriteString("\nIMPORTANT: You MUST commit your changes before finishing. ")
-	b.WriteString("The commit message should describe what was done, not just the task name.\n")
+	b.WriteString("The commit message should describe what was done, not just the task name. ")
+	b.WriteString("Do NOT add Co-Authored-By or any other trailers to the commit message.\n")
 
 	return b.String()
 }
