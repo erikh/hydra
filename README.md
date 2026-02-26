@@ -129,8 +129,9 @@ Executes the full task lifecycle:
 3. Clones the source repo into a per-task work directory (`work/{task-name}/`)
 4. Creates a git branch `hydra/<task-name>`
 5. Assembles a document from `rules.md`, `lint.md`, the task content, `functional.md`, and commit instructions
-6. Opens a Claude session — Claude implements the changes, runs tests/lint, and commits with a descriptive message (GPG-signed if a signing key is configured)
-7. Verifies Claude committed (HEAD moved), records the SHA, pushes, and moves the task to review
+6. Runs the `before` command if configured in `hydra.yml`
+7. Opens a Claude session — Claude implements the changes, runs tests/lint, and commits with a descriptive message (GPG-signed if a signing key is configured)
+8. Verifies Claude committed (HEAD moved), records the SHA, pushes, and moves the task to review
 
 **Flags:**
 
@@ -163,7 +164,7 @@ hydra review run <task-name>       # Run interactive review session
 hydra review dev <task-name>       # Run the dev command in the task's work directory
 ```
 
-`hydra review run` opens a Claude session where Claude reviews the implementation and validates:
+`hydra review run` runs the `before` command if configured, then opens a Claude session where Claude reviews the implementation and validates:
 
 - **Commit messages** — reads the git log and verifies commit messages accurately describe the changes per the task document; amends if needed
 - **Test coverage** — identifies every feature described in the task document and verifies each has test coverage; adds missing tests
@@ -176,7 +177,7 @@ If Claude commits changes, they are pushed automatically. The task stays in revi
 
 ### `hydra test <task-name>`
 
-Runs a test-focused Claude session on a task in review state. Claude reads the task description and existing implementation, then:
+Runs the `before` command if configured, then opens a test-focused Claude session on a task in review state. Claude reads the task description and existing implementation, then:
 
 1. Identifies every feature, behavior, and edge case described in the task document
 2. Checks which features already have test coverage
@@ -207,10 +208,10 @@ hydra merge run <task-name>        # Run merge workflow
 
 `hydra merge run` performs:
 
-1. Rebase onto `origin/main`, resolve conflicts via Claude if needed
-2. Run tests/lint, fix failures via Claude if needed
-3. **Pre-merge verification** — Claude double-checks commit messages against the task document, verifies test coverage, runs lint and tests, and fixes any issues
-4. Rebase task branch into main, push, record SHA, move to completed, close the remote issue if applicable, and delete the remote feature branch
+1. Attempts to rebase onto `origin/main`; if conflicts occur, the rebase is aborted and the conflict file list is recorded
+2. Runs the `before` command if configured in `hydra.yml`
+3. Opens a single Claude session with a comprehensive document covering: conflict resolution (if needed), commit message validation, test coverage verification, and test/lint commands
+4. Force-pushes the branch, rebases into main, pushes, records the SHA, moves the task to completed, closes the remote issue if applicable, and deletes the remote feature branch
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
