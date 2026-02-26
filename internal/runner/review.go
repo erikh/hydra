@@ -8,7 +8,6 @@ import (
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
 	"github.com/erikh/hydra/internal/lock"
-	"github.com/erikh/hydra/internal/repo"
 )
 
 // Review runs an interactive review session on a task in review state.
@@ -63,6 +62,14 @@ func (r *Runner) Review(taskName string) error {
 		return fmt.Errorf("assembling review document: %w", err)
 	}
 
+	// Append commit instructions so Claude handles staging and committing.
+	sign := taskRepo.HasSigningKey()
+	cmds := r.commandsMap()
+	doc += commitInstructions(sign, cmds)
+
+	// Capture HEAD before invoking Claude.
+	beforeSHA, _ := taskRepo.LastCommitSHA()
+
 	// Invoke Claude with review document.
 	claudeFn := r.Claude
 	if claudeFn == nil {
@@ -79,43 +86,17 @@ func (r *Runner) Review(taskName string) error {
 		return err
 	}
 
-	// If changes were made, commit and push.
-	hasChanges, err := taskRepo.HasChanges()
-	if err != nil {
-		return fmt.Errorf("checking for changes: %w", err)
-	}
+	// Check if Claude committed (HEAD moved).
+	afterSHA, _ := taskRepo.LastCommitSHA()
 
-	if hasChanges {
-		if err := r.commitAndPushReview(taskRepo, taskName, branch); err != nil {
-			return err
-		}
-		fmt.Printf("Review of %q: changes committed and pushed.\n", taskName)
-	} else {
+	if afterSHA == beforeSHA {
 		fmt.Printf("Review of %q: no changes made.\n", taskName)
+		return nil
 	}
 
-	// Task stays in review state.
-	return nil
-}
-
-// commitAndPushReview stages, commits, records, and pushes review changes.
-func (r *Runner) commitAndPushReview(taskRepo *repo.Repo, taskName, branch string) error {
-	if err := taskRepo.AddAll(); err != nil {
-		return fmt.Errorf("staging changes: %w", err)
-	}
-
-	sign := taskRepo.HasSigningKey()
-	commitMsg := "hydra: review " + taskName
-	if err := taskRepo.Commit(commitMsg, sign); err != nil {
-		return fmt.Errorf("committing: %w", err)
-	}
-
-	sha, err := taskRepo.LastCommitSHA()
-	if err != nil {
-		return fmt.Errorf("getting commit SHA: %w", err)
-	}
+	// Record SHA and push.
 	record := design.NewRecord(r.Config.DesignDir)
-	if err := record.Add(sha, "review:"+taskName); err != nil {
+	if err := record.Add(afterSHA, "review:"+taskName); err != nil {
 		return fmt.Errorf("recording SHA: %w", err)
 	}
 
@@ -125,6 +106,9 @@ func (r *Runner) commitAndPushReview(taskRepo *repo.Repo, taskName, branch strin
 			return fmt.Errorf("pushing: %w", fpErr)
 		}
 	}
+	fmt.Printf("Review of %q: changes committed and pushed.\n", taskName)
+
+	// Task stays in review state.
 	return nil
 }
 

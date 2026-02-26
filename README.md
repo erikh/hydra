@@ -6,7 +6,7 @@ AI-driven local pull request workflow where Claude is the only contributor.
 
 ## What is Hydra?
 
-Hydra turns markdown documents that describe desired changes into branches, code, and commits without you writing a line. Each task is just a markdown file describing what to build or fix. Hydra assembles context from your design docs, drives Claude Code to implement each task, runs tests and linting, and pushes a branch ready for your review.
+Hydra turns markdown documents that describe desired changes into branches, code, and commits without you writing a line. Each task is just a markdown file describing what to build or fix. Hydra assembles context from your design docs, hands the full document to Claude Code — including instructions to run tests, lint, and commit — and pushes a branch ready for your review.
 
 ## Concepts
 
@@ -95,7 +95,7 @@ hydra init https://github.com/you/project.git ./my-design
 # Import open issues from GitHub
 hydra sync
 
-# Run a task — Claude implements it, tests pass, branch pushed
+# Run a task — Claude implements, tests, lints, and commits; branch pushed
 hydra run issues/42-fix-bug
 
 # Review the implementation — Claude checks its own work
@@ -123,10 +123,9 @@ Executes the full task lifecycle:
 2. Acquires a per-task file lock — only one instance of the same task runs at a time; different tasks run concurrently
 3. Clones the source repo into a per-task work directory (`work/{task-name}/`)
 4. Creates a git branch `hydra/<task-name>`
-5. Assembles a document from `rules.md`, `lint.md`, the task content, and `functional.md`
-6. Opens an interactive TUI session with the Anthropic API
-7. Runs `test` and `lint` commands from `hydra.yml`
-8. Commits, pushes, records the SHA, and moves the task to review
+5. Assembles a document from `rules.md`, `lint.md`, the task content, `functional.md`, and commit instructions
+6. Opens a Claude session — Claude implements the changes, runs tests/lint, and commits with a descriptive message (GPG-signed if a signing key is configured)
+7. Verifies Claude committed (HEAD moved), records the SHA, pushes, and moves the task to review
 
 **Flags:**
 
@@ -158,7 +157,7 @@ hydra review rm <task-name>        # Move task to abandoned
 hydra review run <task-name>       # Run interactive review session
 ```
 
-`hydra review run` opens a TUI session where Claude reviews the implementation, runs tests, and makes corrections. The task stays in review state after the session.
+`hydra review run` opens a Claude session where Claude reviews the implementation, runs tests, and makes corrections. If Claude commits changes, they are pushed automatically. The task stays in review state after the session.
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
@@ -174,7 +173,7 @@ hydra merge rm <task-name>         # Move task to abandoned
 hydra merge run <task-name>        # Run merge workflow
 ```
 
-`hydra merge run` performs: rebase onto `origin/main`, resolve conflicts via Claude if needed, run tests/lint, rebase task branch into main, push, record SHA, move to completed, and close the remote issue if applicable.
+`hydra merge run` performs: rebase onto `origin/main`, resolve conflicts via Claude if needed, run tests/lint, fix failures via Claude if needed, rebase task branch into main, push, record SHA, move to completed, and close the remote issue if applicable.
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
@@ -222,11 +221,22 @@ api_type: github
 # Gitea instance URL (only needed for Gitea when URL can't be parsed)
 gitea_url: https://gitea.example.com
 
-# Commands to run after Claude makes changes
+# Commands that Claude runs before committing
 commands:
   test: "go test ./... -count=1"
   lint: "golangci-lint run ./..."
 ```
+
+## How Claude Commits
+
+Hydra appends commit instructions to every document sent to Claude. These instructions tell Claude to:
+
+1. Run the `test` command if configured in `hydra.yml`
+2. Run the `lint` command if configured in `hydra.yml`
+3. Stage all changes with `git add -A`
+4. Commit with a descriptive message (GPG-signed if a signing key is available)
+
+After Claude returns, hydra verifies that a commit was made (HEAD moved). If Claude didn't commit, the run fails with an error. This approach lets Claude write meaningful commit messages that describe the actual changes rather than using a generic task name.
 
 ## Interactive TUI
 

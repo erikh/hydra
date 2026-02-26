@@ -98,6 +98,14 @@ func (r *Runner) resolveIssueCloser(repoURL, apiType, giteaURL string) {
 	}
 }
 
+// commandsMap returns the commands from TaskRunner, or nil if not configured.
+func (r *Runner) commandsMap() map[string]string {
+	if r.TaskRunner != nil {
+		return r.TaskRunner.Commands
+	}
+	return nil
+}
+
 // workDir returns the work directory path for a task.
 // Ungrouped tasks: work/{name}, grouped tasks: work/{group}/{name}.
 func (r *Runner) workDir(task *design.Task) string {
@@ -206,6 +214,14 @@ func (r *Runner) Run(taskName string) error {
 		return fmt.Errorf("assembling document: %w", err)
 	}
 
+	// Append commit instructions so Claude handles test/lint/commit.
+	sign := taskRepo.HasSigningKey()
+	cmds := r.commandsMap()
+	doc += commitInstructions(sign, cmds)
+
+	// Capture HEAD before invoking Claude.
+	beforeSHA, _ := taskRepo.LastCommitSHA()
+
 	// Invoke claude
 	claudeFn := r.Claude
 	if claudeFn == nil {
@@ -222,43 +238,15 @@ func (r *Runner) Run(taskName string) error {
 		return err
 	}
 
-	// Verify changes were made
-	hasChanges, err := taskRepo.HasChanges()
-	if err != nil {
-		return fmt.Errorf("checking for changes: %w", err)
-	}
-	if !hasChanges {
+	// Verify Claude committed (HEAD moved).
+	afterSHA, _ := taskRepo.LastCommitSHA()
+	if afterSHA == beforeSHA {
 		return errors.New("claude produced no changes")
 	}
 
-	// Run test and lint commands if configured
-	if r.TaskRunner != nil {
-		if err := r.TaskRunner.Run("test", taskRepo.Dir); err != nil {
-			return fmt.Errorf("test step failed: %w", err)
-		}
-		if err := r.TaskRunner.Run("lint", taskRepo.Dir); err != nil {
-			return fmt.Errorf("lint step failed: %w", err)
-		}
-	}
-
-	// Commit and push
-	if err := taskRepo.AddAll(); err != nil {
-		return fmt.Errorf("staging changes: %w", err)
-	}
-
-	sign := taskRepo.HasSigningKey()
-	commitMsg := "hydra: " + taskName
-	if err := taskRepo.Commit(commitMsg, sign); err != nil {
-		return fmt.Errorf("committing: %w", err)
-	}
-
 	// Record SHA -> task name
-	sha, err := taskRepo.LastCommitSHA()
-	if err != nil {
-		return fmt.Errorf("getting commit SHA: %w", err)
-	}
 	record := design.NewRecord(r.Config.DesignDir)
-	if err := record.Add(sha, taskName); err != nil {
+	if err := record.Add(afterSHA, taskName); err != nil {
 		return fmt.Errorf("recording SHA: %w", err)
 	}
 

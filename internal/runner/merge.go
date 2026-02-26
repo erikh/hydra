@@ -166,10 +166,24 @@ func (r *Runner) fixTestFailures(task *design.Task, taskRepo *repo.Repo, testErr
 	content, _ := task.Content()
 	doc := r.assembleTestFixDocument(content, testError)
 
+	// Append commit instructions without test commands (the point is to fix failures).
+	sign := taskRepo.HasSigningKey()
+	doc += commitInstructions(sign, nil)
+
+	// Capture HEAD before invoking Claude.
+	beforeSHA, _ := taskRepo.LastCommitSHA()
+
 	if err := r.invokeClaudeForRepo(taskRepo.Dir, doc); err != nil {
 		return fmt.Errorf("test fix failed: %w", err)
 	}
 
+	// Check if Claude committed.
+	afterSHA, _ := taskRepo.LastCommitSHA()
+	if afterSHA != beforeSHA {
+		return nil
+	}
+
+	// Fallback: if Claude didn't commit, commit any changes ourselves.
 	hasChanges, _ := taskRepo.HasChanges()
 	if !hasChanges {
 		return nil
@@ -178,7 +192,6 @@ func (r *Runner) fixTestFailures(task *design.Task, taskRepo *repo.Repo, testErr
 	if err := taskRepo.AddAll(); err != nil {
 		return fmt.Errorf("staging test fixes: %w", err)
 	}
-	sign := taskRepo.HasSigningKey()
 	if err := taskRepo.Commit("hydra: fix tests after rebase", sign); err != nil {
 		return fmt.Errorf("committing test fixes: %w", err)
 	}

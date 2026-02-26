@@ -114,9 +114,27 @@ func mkdirAll(t *testing.T, path string) {
 	}
 }
 
-// mockClaude simulates claude by creating a file in the repo.
+// mockCommit stages and commits all changes in the given repo dir.
+func mockCommit(dir string) error {
+	add := exec.CommandContext(context.Background(), "git", "add", "-A")
+	add.Dir = dir
+	if out, err := add.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w\n%s", err, out)
+	}
+	commit := exec.CommandContext(context.Background(), "git", "commit", "-m", "mock commit")
+	commit.Dir = dir
+	if out, err := commit.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %w\n%s", err, out)
+	}
+	return nil
+}
+
+// mockClaude simulates claude by creating a file in the repo and committing.
 func mockClaude(_ context.Context, cfg ClaudeRunConfig) error {
-	return os.WriteFile(filepath.Join(cfg.RepoDir, "generated.go"), []byte("package main\n"), 0o600)
+	if err := os.WriteFile(filepath.Join(cfg.RepoDir, "generated.go"), []byte("package main\n"), 0o600); err != nil {
+		return err
+	}
+	return mockCommit(cfg.RepoDir)
 }
 
 // mockClaudeNoChanges simulates claude doing nothing.
@@ -133,7 +151,10 @@ func mockClaudeFailing(_ context.Context, _ ClaudeRunConfig) error {
 func mockClaudeCapture(captured *string) ClaudeFunc {
 	return func(_ context.Context, cfg ClaudeRunConfig) error {
 		*captured = cfg.Document
-		return os.WriteFile(filepath.Join(cfg.RepoDir, "output.txt"), []byte("done"), 0o600)
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "output.txt"), []byte("done"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
 	}
 }
 
@@ -141,7 +162,10 @@ func mockClaudeCapture(captured *string) ClaudeFunc {
 func mockClaudeCaptureConfig(captured *ClaudeRunConfig) ClaudeFunc {
 	return func(_ context.Context, cfg ClaudeRunConfig) error {
 		*captured = cfg
-		return os.WriteFile(filepath.Join(cfg.RepoDir, "output.txt"), []byte("done"), 0o600)
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "output.txt"), []byte("done"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
 	}
 }
 
@@ -458,15 +482,15 @@ func TestRunCommitMessage(t *testing.T) {
 
 	wd := workDirForTask(env.BaseDir)
 
-	// Check the commit message.
+	// Check that Claude wrote the commit message (not a generic hydra message).
 	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "log", "-1", "--format=%s").Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
 
 	msg := strings.TrimSpace(string(out))
-	if msg != "hydra: add-feature" {
-		t.Errorf("commit message = %q, want 'hydra: add-feature'", msg)
+	if msg == "" {
+		t.Error("commit message is empty")
 	}
 }
 
@@ -533,49 +557,30 @@ func TestRunTaskStateAfterMultipleRuns(t *testing.T) {
 	}
 }
 
-func TestRunWithFailingTest(t *testing.T) {
+func TestRunDocumentIncludesCommitInstructions(t *testing.T) {
 	env := setupTestEnv(t)
-
-	// Override hydra.yml with a failing test command.
-	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"), "commands:\n  test: \"false\"\n  lint: \"true\"\n")
 
 	r, err := New(env.Config)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
-	r.Claude = mockClaude
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
 	r.BaseDir = env.BaseDir
 
-	err = r.Run("add-feature")
-	if err == nil {
-		t.Fatal("expected error when test command fails")
-	}
-	if !strings.Contains(err.Error(), "test step failed") {
-		t.Errorf("error = %q, want test step failed message", err)
-	}
-}
-
-func TestRunWithFailingLint(t *testing.T) {
-	env := setupTestEnv(t)
-
-	// Override hydra.yml with a failing lint command.
-	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"), "commands:\n  test: \"true\"\n  lint: \"false\"\n")
-
-	r, err := New(env.Config)
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
 	}
 
-	r.Claude = mockClaude
-	r.BaseDir = env.BaseDir
-
-	err = r.Run("add-feature")
-	if err == nil {
-		t.Fatal("expected error when lint command fails")
+	if !strings.Contains(captured, "# Commit Instructions") {
+		t.Error("document missing Commit Instructions section")
 	}
-	if !strings.Contains(err.Error(), "lint step failed") {
-		t.Errorf("error = %q, want lint step failed message", err)
+	if !strings.Contains(captured, "git add -A") {
+		t.Error("document missing git add instruction")
+	}
+	if !strings.Contains(captured, "git commit") {
+		t.Error("document missing git commit instruction")
 	}
 }
 
@@ -668,7 +673,10 @@ func TestRunGroupFullWorkflow(t *testing.T) {
 	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
 		callCount++
 		fname := fmt.Sprintf("generated-%d.go", callCount)
-		return os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600)
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
 	}
 	r.BaseDir = env.BaseDir
 
@@ -711,7 +719,10 @@ func TestRunGroupStopsOnError(t *testing.T) {
 		callCount++
 		if callCount == 1 {
 			fname := fmt.Sprintf("generated-%d.go", callCount)
-			return os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600)
+			if err := os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600); err != nil {
+				return err
+			}
+			return mockCommit(cfg.RepoDir)
 		}
 		return errors.New("claude crashed")
 	}
@@ -853,7 +864,10 @@ func TestRunGroupNoBaseBranch(t *testing.T) {
 	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
 		callCount++
 		fname := fmt.Sprintf("generated-%d.go", callCount)
-		return os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600)
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
 	}
 	r.BaseDir = env.BaseDir
 
@@ -952,11 +966,14 @@ func TestReviewWorkflow(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Now run review (with mock Claude that makes changes).
+	// Now run review (with mock Claude that makes changes and commits).
 	reviewCallCount := 0
 	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
 		reviewCallCount++
-		return os.WriteFile(filepath.Join(cfg.RepoDir, "review-fix.go"), []byte("package main\n// fixed"), 0o600)
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "review-fix.go"), []byte("package main\n// fixed"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
 	}
 
 	if err := r.Review("add-feature"); err != nil {
