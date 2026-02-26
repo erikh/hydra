@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
@@ -34,6 +36,7 @@ func NewApp() *cli.App {
 			otherCommand(),
 			reviewCommand(),
 			testCommand(),
+			cleanCommand(),
 			mergeCommand(),
 			statusCommand(),
 			listCommand(),
@@ -678,19 +681,135 @@ func newRunner() (*runner.Runner, error) {
 }
 
 func reviewCommand() *cli.Command {
-	return stateCommand(
-		"review",
-		"Manage and run review sessions on completed tasks",
-		"CRUD operations and interactive review sessions for tasks in the review state.",
-		"Run an interactive review session",
-		stateOps{
-			list: (*runner.Runner).ReviewList,
-			view: (*runner.Runner).ReviewView,
-			edit: (*runner.Runner).ReviewEdit,
-			rm:   (*runner.Runner).ReviewRemove,
-			run:  (*runner.Runner).Review,
+	return &cli.Command{
+		Name:        "review",
+		Usage:       "Manage and run review sessions on completed tasks",
+		Description: "CRUD operations and interactive review sessions for tasks in the review state.",
+		Subcommands: []*cli.Command{
+			{
+				Name:  "list",
+				Usage: "List tasks in review state",
+				Action: func(_ *cli.Context) error {
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return r.ReviewList()
+				},
+			},
+			{
+				Name:      "view",
+				Usage:     "Print task content from review state",
+				ArgsUsage: "<task-name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra review view <task-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return r.ReviewView(c.Args().Get(0))
+				},
+			},
+			{
+				Name:      "edit",
+				Usage:     "Open a task in review state in the editor",
+				ArgsUsage: "<task-name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra review edit <task-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					editor, err := resolveEditor()
+					if err != nil {
+						return err
+					}
+					return r.ReviewEdit(c.Args().Get(0), editor)
+				},
+			},
+			{
+				Name:      "rm",
+				Usage:     "Move a task from review to abandoned",
+				ArgsUsage: "<task-name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra review rm <task-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return r.ReviewRemove(c.Args().Get(0))
+				},
+			},
+			{
+				Name:      "run",
+				Usage:     "Run an interactive review session",
+				ArgsUsage: "<task-name>",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "no-auto-accept",
+						Aliases: []string{"Y"},
+						Usage:   "Disable auto-accept (prompt for each tool call)",
+					},
+					&cli.BoolFlag{
+						Name:    "no-plan",
+						Aliases: []string{"P"},
+						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+					},
+					&cli.StringFlag{
+						Name:  "model",
+						Usage: "Override the Claude model",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra review run <task-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					r.AutoAccept = true
+					r.PlanMode = true
+					if c.Bool("no-auto-accept") {
+						r.AutoAccept = false
+					}
+					if c.Bool("no-plan") {
+						r.PlanMode = false
+					}
+					if m := c.String("model"); m != "" {
+						r.Model = m
+					}
+					return r.Review(c.Args().Get(0))
+				},
+			},
+			{
+				Name:      "dev",
+				Usage:     "Run the dev command from hydra.yml in the task's work directory",
+				ArgsUsage: "<task-name>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra review dev <task-name>")
+					}
+
+					ctx, stop := signal.NotifyContext(context.Background(),
+						syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+					defer stop()
+
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return r.ReviewDev(ctx, c.Args().Get(0))
+				},
+			},
 		},
-	)
+	}
 }
 
 func testCommand() *cli.Command {
@@ -740,6 +859,28 @@ func testCommand() *cli.Command {
 			}
 
 			return r.Test(c.Args().Get(0))
+		},
+	}
+}
+
+func cleanCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "clean",
+		Usage:     "Run the clean command from hydra.yml in a task's work directory",
+		ArgsUsage: "<task-name>",
+		Description: "Runs the clean command defined in hydra.yml in the task's work directory, " +
+			"regardless of which state the task is in.",
+		Action: func(c *cli.Context) error {
+			if c.NArg() != 1 {
+				return errors.New("usage: hydra clean <task-name>")
+			}
+
+			r, err := newRunner()
+			if err != nil {
+				return err
+			}
+
+			return r.Clean(c.Args().Get(0))
 		},
 	}
 }

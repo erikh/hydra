@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -9,6 +10,35 @@ import (
 	"github.com/erikh/hydra/internal/design"
 	"github.com/erikh/hydra/internal/lock"
 )
+
+// ReviewDev runs the dev command from hydra.yml in the task's work directory.
+// The process runs until it exits or the context is cancelled.
+func (r *Runner) ReviewDev(ctx context.Context, taskName string) error {
+	task, err := r.Design.FindTaskByState(taskName, design.StateReview)
+	if err != nil {
+		return err
+	}
+
+	wd := r.workDir(task)
+
+	taskRepo, err := r.prepareRepo(wd)
+	if err != nil {
+		return fmt.Errorf("preparing work directory: %w", err)
+	}
+
+	branch := task.BranchName()
+	if taskRepo.BranchExists(branch) {
+		if err := taskRepo.Checkout(branch); err != nil {
+			return fmt.Errorf("checking out branch: %w", err)
+		}
+	}
+
+	if r.TaskRunner == nil {
+		return errors.New("no dev command configured in hydra.yml and no dev target in Makefile")
+	}
+
+	return r.TaskRunner.RunDev(ctx, wd)
+}
 
 // Review runs an interactive review session on a task in review state.
 // The task stays in review state after the review session.
@@ -64,7 +94,7 @@ func (r *Runner) Review(taskName string) error {
 
 	// Append verification and commit instructions so Claude handles test/lint/staging/committing.
 	sign := taskRepo.HasSigningKey()
-	cmds := r.commandsMap()
+	cmds := r.commandsMap(wd)
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 

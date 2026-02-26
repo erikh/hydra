@@ -67,6 +67,8 @@ const DefaultHydraYml = `# Commands that Claude runs before committing.
 # work directory, or shared network ports. Each invocation should be fully
 # isolated to its own working tree.
 commands:
+  # clean: "make clean"
+  # dev: "npm run dev"
   # lint: "golangci-lint run ./..."
   # test: "go test ./... -count=1"
 `

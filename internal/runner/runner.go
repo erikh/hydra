@@ -92,10 +92,12 @@ func (r *Runner) resolveIssueCloser(repoURL, apiType, giteaURL string) {
 	}
 }
 
-// commandsMap returns the commands from TaskRunner, or nil if not configured.
-func (r *Runner) commandsMap() map[string]string {
+// commandsMap returns the effective commands from TaskRunner including
+// Makefile fallbacks for the given work directory. Returns nil if TaskRunner
+// is not configured.
+func (r *Runner) commandsMap(workDir string) map[string]string {
 	if r.TaskRunner != nil {
-		return r.TaskRunner.Commands
+		return r.TaskRunner.EffectiveCommands(workDir)
 	}
 	return nil
 }
@@ -210,7 +212,7 @@ func (r *Runner) Run(taskName string) error {
 
 	// Append verification and commit instructions so Claude handles test/lint/commit.
 	sign := taskRepo.HasSigningKey()
-	cmds := r.commandsMap()
+	cmds := r.commandsMap(wd)
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 

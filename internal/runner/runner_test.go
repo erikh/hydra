@@ -1708,3 +1708,307 @@ func TestTestPushesChanges(t *testing.T) {
 		t.Error("record.json missing test:add-feature entry")
 	}
 }
+
+func TestReviewDevRunsCommand(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Add dev command to hydra.yml.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  dev: \"echo dev-running\"\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Re-create runner to pick up updated hydra.yml.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// ReviewDev should succeed and run the command.
+	if err := r.ReviewDev(context.Background(), "add-feature"); err != nil {
+		t.Fatalf("ReviewDev: %v", err)
+	}
+}
+
+func TestReviewDevMissingCommand(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// hydra.yml without dev command.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// ReviewDev should fail because no dev command is configured.
+	err = r.ReviewDev(context.Background(), "add-feature")
+	if err == nil {
+		t.Fatal("expected error when dev command is not configured")
+	}
+	if !strings.Contains(err.Error(), "no dev command") && !strings.Contains(err.Error(), "no dev") {
+		t.Errorf("error = %q, want message about no dev command", err)
+	}
+}
+
+func TestCleanRunsCommand(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Add clean command to hydra.yml.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  clean: \"touch cleaned.txt\"\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move it to review and create a work dir.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Re-create runner to pick up updated hydra.yml.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	if err := r.Clean("add-feature"); err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+
+	// Verify the clean command ran in the correct work dir.
+	wd := workDirForTask(env.BaseDir)
+	if _, err := os.Stat(filepath.Join(wd, "cleaned.txt")); err != nil {
+		t.Error("clean command did not run in the work directory")
+	}
+}
+
+func TestCleanMissingCommand(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// hydra.yml without clean command.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Clean should fail because no clean command is configured (and no Makefile).
+	err = r.Clean("add-feature")
+	if err == nil {
+		t.Fatal("expected error when clean command is not configured")
+	}
+	if !strings.Contains(err.Error(), "no clean command") {
+		t.Errorf("error = %q, want message about no clean command", err)
+	}
+}
+
+func TestCleanFallsBackToMakefile(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// hydra.yml without clean command.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to create the work directory.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Write a Makefile with a clean target in the work dir.
+	wd := workDirForTask(env.BaseDir)
+	writeFile(t, filepath.Join(wd, "Makefile"), "clean:\n\ttouch makefile-cleaned.txt\n")
+
+	// Re-create runner.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Clean should fall back to make clean.
+	if err := r.Clean("add-feature"); err != nil {
+		t.Fatalf("Clean with Makefile fallback: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(wd, "makefile-cleaned.txt")); err != nil {
+		t.Error("make clean did not run in the work directory")
+	}
+}
+
+func TestCleanFindsTaskInAnyState(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Add clean command to hydra.yml.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  clean: \"touch cleaned.txt\"\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run add-feature to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Move add-feature from review to completed.
+	dd, _ := design.NewDir(env.DesignDir)
+	task, err := dd.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Fatalf("FindTaskByState: %v", err)
+	}
+	if err := dd.MoveTask(task, design.StateCompleted); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	// Re-create runner to pick up updated hydra.yml.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Clean should still find the task in completed state.
+	if err := r.Clean("add-feature"); err != nil {
+		t.Fatalf("Clean on completed task: %v", err)
+	}
+
+	wd := workDirForTask(env.BaseDir)
+	if _, err := os.Stat(filepath.Join(wd, "cleaned.txt")); err != nil {
+		t.Error("clean command did not run for completed task")
+	}
+}
+
+func TestFindTaskAny(t *testing.T) {
+	dir := t.TempDir()
+	mkdirAll(t, filepath.Join(dir, "tasks"))
+	mkdirAll(t, filepath.Join(dir, "state", "review"))
+	mkdirAll(t, filepath.Join(dir, "state", "merge"))
+	mkdirAll(t, filepath.Join(dir, "state", "completed"))
+	mkdirAll(t, filepath.Join(dir, "state", "abandoned"))
+
+	writeFile(t, filepath.Join(dir, "tasks", "pending-task.md"), "Pending task")
+	writeFile(t, filepath.Join(dir, "state", "review", "review-task.md"), "Review task")
+	writeFile(t, filepath.Join(dir, "state", "completed", "done-task.md"), "Done task")
+
+	dd, err := design.NewDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find pending task.
+	task, err := dd.FindTaskAny("pending-task")
+	if err != nil {
+		t.Fatalf("FindTaskAny pending: %v", err)
+	}
+	if task.Name != "pending-task" || task.State != design.StatePending {
+		t.Errorf("got %q state=%s, want pending-task pending", task.Name, task.State)
+	}
+
+	// Find review task.
+	task, err = dd.FindTaskAny("review-task")
+	if err != nil {
+		t.Fatalf("FindTaskAny review: %v", err)
+	}
+	if task.Name != "review-task" || task.State != design.StateReview {
+		t.Errorf("got %q state=%s, want review-task review", task.Name, task.State)
+	}
+
+	// Find completed task.
+	task, err = dd.FindTaskAny("done-task")
+	if err != nil {
+		t.Fatalf("FindTaskAny completed: %v", err)
+	}
+	if task.Name != "done-task" || task.State != design.StateCompleted {
+		t.Errorf("got %q state=%s, want done-task completed", task.Name, task.State)
+	}
+
+	// Not found.
+	_, err = dd.FindTaskAny("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent task")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want not found", err)
+	}
+}
+
+func TestReviewDevContextCancellation(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Use a long-running dev command (sleep).
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  dev: \"sleep 60\"\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Re-create runner.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Cancel context immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = r.ReviewDev(ctx, "add-feature")
+	if err == nil {
+		t.Fatal("expected error when context is cancelled")
+	}
+}

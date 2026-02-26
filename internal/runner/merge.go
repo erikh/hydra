@@ -169,7 +169,8 @@ func (r *Runner) runPostRebaseChecks(task *design.Task, taskRepo *repo.Repo) err
 // fixTestFailures opens a Claude TUI to fix test failures, then commits fixes.
 func (r *Runner) fixTestFailures(task *design.Task, taskRepo *repo.Repo, testError string) error {
 	content, _ := task.Content()
-	doc := r.assembleTestFixDocument(content, testError)
+	cmds := r.commandsMap(taskRepo.Dir)
+	doc := assembleTestFixDocument(content, testError, cmds)
 
 	// Append commit instructions without test commands (the point is to fix failures).
 	sign := taskRepo.HasSigningKey()
@@ -222,10 +223,10 @@ func (r *Runner) invokeClaudeForRepo(repoDir, document string) error {
 // before merging into the default branch.
 func (r *Runner) preMergeChecks(task *design.Task, taskRepo *repo.Repo) error {
 	content, _ := task.Content()
-	doc := r.assemblePreMergeDocument(content)
+	cmds := r.commandsMap(taskRepo.Dir)
+	doc := assemblePreMergeDocument(content, cmds)
 
 	sign := taskRepo.HasSigningKey()
-	cmds := r.commandsMap()
 	doc += commitInstructions(sign, cmds)
 
 	beforeSHA, _ := taskRepo.LastCommitSHA()
@@ -247,7 +248,7 @@ func (r *Runner) preMergeChecks(task *design.Task, taskRepo *repo.Repo) error {
 }
 
 // assemblePreMergeDocument builds a document for pre-merge verification.
-func (r *Runner) assemblePreMergeDocument(taskContent string) string {
+func assemblePreMergeDocument(taskContent string, cmds map[string]string) string {
 	var b strings.Builder
 	b.WriteString("# Pre-Merge Verification\n\n")
 	b.WriteString("This branch is about to be merged into the default branch. " +
@@ -270,19 +271,15 @@ func (r *Runner) assemblePreMergeDocument(taskContent string) string {
 		"has corresponding test coverage. If any requirement lacks tests, add the missing tests.\n\n")
 
 	b.WriteString("### 3. Lint\n\n")
-	if r.TaskRunner != nil {
-		if lintCmd, ok := r.TaskRunner.Commands["lint"]; ok {
-			b.WriteString(fmt.Sprintf("Run the linter: `%s`\n", lintCmd))
-			b.WriteString("Fix any lint issues found.\n\n")
-		}
+	if lintCmd, ok := cmds["lint"]; ok {
+		b.WriteString(fmt.Sprintf("Run the linter: `%s`\n", lintCmd))
+		b.WriteString("Fix any lint issues found.\n\n")
 	}
 
 	b.WriteString("### 4. Tests\n\n")
-	if r.TaskRunner != nil {
-		if testCmd, ok := r.TaskRunner.Commands["test"]; ok {
-			b.WriteString(fmt.Sprintf("Run the test suite: `%s`\n", testCmd))
-			b.WriteString("Fix any test failures.\n\n")
-		}
+	if testCmd, ok := cmds["test"]; ok {
+		b.WriteString(fmt.Sprintf("Run the test suite: `%s`\n", testCmd))
+		b.WriteString("Fix any test failures.\n\n")
 	}
 
 	b.WriteString("If everything passes and no changes are needed, do not create a commit.\n")
@@ -380,17 +377,15 @@ func (r *Runner) assembleConflictDocument(taskContent string, conflictFiles []st
 }
 
 // assembleTestFixDocument builds a document for fixing test failures after rebase.
-func (r *Runner) assembleTestFixDocument(taskContent string, testError string) string {
+func assembleTestFixDocument(taskContent string, testError string, cmds map[string]string) string {
 	doc := "# Fix Test Failures\n\n"
 	doc += "Tests failed after rebasing onto origin/main. " +
 		"Please fix the test failures.\n\n"
 	doc += "## Error Output\n\n```\n" + testError + "\n```\n\n"
 	doc += "## Task Context\n\n" + taskContent + "\n"
 
-	if r.TaskRunner != nil {
-		if testCmd, ok := r.TaskRunner.Commands["test"]; ok {
-			doc += fmt.Sprintf("\nRun tests with: `%s`\n", testCmd)
-		}
+	if testCmd, ok := cmds["test"]; ok {
+		doc += fmt.Sprintf("\nRun tests with: `%s`\n", testCmd)
 	}
 
 	return doc

@@ -6,6 +6,8 @@ AI-driven local pull request workflow where Claude is the only contributor.
 
 ## What is Hydra?
 
+You don't need a CI system. You don't need VM infrastructure. You don't need web interfaces. You don't even need pull requests. You don't even need to push to do anything. You just need Claude.
+
 Hydra turns markdown documents that describe desired changes into branches, code, and commits without you writing a line. Each task is just a markdown file describing what to build or fix. Hydra assembles context from your design docs, hands the full document to Claude Code — including instructions to run tests, lint, and commit — and pushes a branch ready for your review.
 
 ## Concepts
@@ -158,6 +160,7 @@ hydra review view <task-name>      # Print task content
 hydra review edit <task-name>      # Open task in editor
 hydra review rm <task-name>        # Move task to abandoned
 hydra review run <task-name>       # Run interactive review session
+hydra review dev <task-name>       # Run the dev command in the task's work directory
 ```
 
 `hydra review run` opens a Claude session where Claude reviews the implementation and validates:
@@ -166,6 +169,8 @@ hydra review run <task-name>       # Run interactive review session
 - **Test coverage** — identifies every feature described in the task document and verifies each has test coverage; adds missing tests
 
 If Claude commits changes, they are pushed automatically. The task stays in review state after the session.
+
+`hydra review dev` runs the `dev` command from `hydra.yml` in the task's work directory. The process runs until it exits or is terminated with Ctrl+C (SIGINT), SIGTERM, or SIGHUP. Use this to start a local dev server, file watcher, or hot-reload process while reviewing a task.
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
@@ -181,6 +186,12 @@ Runs a test-focused Claude session on a task in review state. Claude reads the t
 If Claude commits changes, they are pushed automatically. The task stays in review state.
 
 **Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+
+### `hydra clean <task-name>`
+
+Runs the `clean` command from `hydra.yml` in the task's work directory, regardless of which state the task is in. Use this to reset build artifacts, remove generated files, or restore the work directory to a clean state.
+
+The task can be in any state (pending, review, merge, completed, or abandoned). The `clean` command must be configured in `hydra.yml`.
 
 ### `hydra merge`
 
@@ -258,9 +269,20 @@ gitea_url: https://gitea.example.com
 # work directory, or shared network ports. Each invocation should be fully
 # isolated to its own working tree.
 commands:
+  clean: "make clean"
+  dev: "npm run dev"
   test: "go test ./... -count=1"
   lint: "golangci-lint run ./..."
 ```
+
+**Command keys:**
+
+- **`clean`** — Run by `hydra clean`. Resets build artifacts or restores the work directory. Not run by Claude.
+- **`dev`** — Run by `hydra review dev`. Starts a long-lived process (dev server, file watcher, etc.) in the task's work directory. Not run by Claude.
+- **`test`** — Run by Claude before committing. Executes the project's test suite.
+- **`lint`** — Run by Claude before committing. Executes the project's linter.
+
+**Makefile fallback:** If a command key is not configured in `hydra.yml`, hydra checks for a `Makefile` in the task's work directory. If a matching make target exists (e.g. `clean:`, `test:`, `lint:`, `dev:`), hydra runs `make <name>` as a fallback. This means projects with a standard Makefile work out of the box without any `hydra.yml` configuration.
 
 **Concurrency safety:** Hydra runs each task in its own cloned work directory under `work/`. Multiple tasks can run concurrently, so your test and lint commands must be safe to execute in parallel. Avoid hardcoded ports, shared temp directories, global lock files, or anything else that would collide when two instances run at the same time. Each command should operate entirely within the current working tree.
 

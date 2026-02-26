@@ -58,11 +58,11 @@ func (r *Runner) Test(taskName string) error {
 		return err
 	}
 
-	doc := r.assembleTestDocument(content)
+	cmds := r.commandsMap(wd)
+	doc := assembleTestDocument(content, cmds)
 
 	// Append verification and commit instructions so Claude handles test/lint/staging/committing.
 	sign := taskRepo.HasSigningKey()
-	cmds := r.commandsMap()
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 
@@ -111,7 +111,7 @@ func (r *Runner) Test(taskName string) error {
 }
 
 // assembleTestDocument builds a document for the test session.
-func (r *Runner) assembleTestDocument(taskContent string) string {
+func assembleTestDocument(taskContent string, cmds map[string]string) string {
 	var b strings.Builder
 
 	b.WriteString("# Task Description\n\n")
@@ -128,15 +128,13 @@ func (r *Runner) assembleTestDocument(taskContent string) string {
 	b.WriteString("3. Add tests for any features or behaviors that lack coverage\n")
 	b.WriteString("4. Ensure tests cover both success and error paths\n\n")
 
-	if r.TaskRunner != nil {
-		if testCmd, ok := r.TaskRunner.Commands["test"]; ok {
-			b.WriteString(fmt.Sprintf("Run the test suite with: `%s`\n", testCmd))
-			b.WriteString("Fix any test failures.\n\n")
-		}
-		if lintCmd, ok := r.TaskRunner.Commands["lint"]; ok {
-			b.WriteString(fmt.Sprintf("Run the linter with: `%s`\n", lintCmd))
-			b.WriteString("Fix any lint issues.\n\n")
-		}
+	if testCmd, ok := cmds["test"]; ok {
+		b.WriteString(fmt.Sprintf("Run the test suite with: `%s`\n", testCmd))
+		b.WriteString("Fix any test failures.\n\n")
+	}
+	if lintCmd, ok := cmds["lint"]; ok {
+		b.WriteString(fmt.Sprintf("Run the linter with: `%s`\n", lintCmd))
+		b.WriteString("Fix any lint issues.\n\n")
 	}
 
 	return b.String()

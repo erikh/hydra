@@ -165,6 +165,25 @@ func (d *Dir) FindTaskByState(name string, state TaskState) (*Task, error) {
 	return nil, fmt.Errorf("task %q not found in %s state", name, state)
 }
 
+// FindTaskAny looks up a task by name across all states.
+func (d *Dir) FindTaskAny(name string) (*Task, error) {
+	tasks, err := d.AllTasks()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, t := range tasks {
+		if t.Name == name {
+			return &t, nil
+		}
+		if t.Group != "" && (t.Group+"/"+t.Name) == name {
+			return &t, nil
+		}
+	}
+
+	return nil, fmt.Errorf("task %q not found in any state", name)
+}
+
 // MoveTask moves a task file to the given state directory.
 func (d *Dir) MoveTask(task *Task, newState TaskState) error {
 	var destDir string
