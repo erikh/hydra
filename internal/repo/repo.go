@@ -90,3 +90,8 @@ func (r *Repo) HasSigningKey() bool {
 func (r *Repo) CurrentBranch() (string, error) {
 	return r.run("rev-parse", "--abbrev-ref", "HEAD")
 }
+
+// LastCommitSHA returns the full SHA of the HEAD commit.
+func (r *Repo) LastCommitSHA() (string, error) {
+	return r.run("rev-parse", "HEAD")
+}

@@ -4,11 +4,14 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
 	"github.com/erikh/hydra/internal/lock"
 	"github.com/erikh/hydra/internal/repo"
+	"github.com/erikh/hydra/internal/taskrun"
 )
 
 // ClaudeFunc is the function signature for invoking claude.
@@ -17,11 +20,12 @@ type ClaudeFunc func(repoDir, document string) error
 
 // Runner orchestrates the full hydra run workflow.
 type Runner struct {
-	Config  *config.Config
-	Design  *design.Dir
-	Repo    *repo.Repo
-	Claude  ClaudeFunc
-	BaseDir string // working directory for lock file; defaults to "."
+	Config     *config.Config
+	Design     *design.Dir
+	Repo       *repo.Repo
+	Claude     ClaudeFunc
+	TaskRunner *taskrun.Commands // loaded from hydra.yml; nil if not present
+	BaseDir    string            // working directory for lock file; defaults to "."
 }
 
 // New creates a Runner from the given config.
@@ -31,16 +35,28 @@ func New(cfg *config.Config) (*Runner, error) {
 		return nil, err
 	}
 
-	return &Runner{
+	r := &Runner{
 		Config:  cfg,
 		Design:  dd,
 		Repo:    repo.Open(cfg.RepoDir),
 		Claude:  invokeClaude,
 		BaseDir: ".",
-	}, nil
+	}
+
+	// Load hydra.yml if it exists.
+	ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
+	if _, err := os.Stat(ymlPath); err == nil {
+		cmds, err := taskrun.Load(ymlPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading hydra.yml: %w", err)
+		}
+		r.TaskRunner = cmds
+	}
+
+	return r, nil
 }
 
-// Run executes the full task lifecycle: lock, branch, assemble, claude, commit, push, move to review.
+// Run executes the full task lifecycle: lock, branch, assemble, claude, test, lint, commit, push, record, move to review.
 func (r *Runner) Run(taskName string) error {
 	baseDir := r.BaseDir
 	if baseDir == "" {
@@ -96,6 +112,16 @@ func (r *Runner) Run(taskName string) error {
 		return errors.New("claude produced no changes")
 	}
 
+	// Run test and lint commands if configured
+	if r.TaskRunner != nil {
+		if err := r.TaskRunner.Run("test", r.Config.RepoDir); err != nil {
+			return fmt.Errorf("test step failed: %w", err)
+		}
+		if err := r.TaskRunner.Run("lint", r.Config.RepoDir); err != nil {
+			return fmt.Errorf("lint step failed: %w", err)
+		}
+	}
+
 	// Commit and push
 	if err := r.Repo.AddAll(); err != nil {
 		return fmt.Errorf("staging changes: %w", err)
@@ -105,6 +131,16 @@ func (r *Runner) Run(taskName string) error {
 	commitMsg := "hydra: " + taskName
 	if err := r.Repo.Commit(commitMsg, sign); err != nil {
 		return fmt.Errorf("committing: %w", err)
+	}
+
+	// Record SHA -> task name
+	sha, err := r.Repo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting commit SHA: %w", err)
+	}
+	record := design.NewRecord(r.Config.DesignDir)
+	if err := record.Add(sha, taskName); err != nil {
+		return fmt.Errorf("recording SHA: %w", err)
 	}
 
 	if err := r.Repo.Push(branch); err != nil {

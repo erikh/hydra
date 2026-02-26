@@ -57,6 +57,48 @@ func (d *Dir) Functional() (string, error) {
 	return d.readFile("functional.md")
 }
 
+// Scaffold creates the full design directory skeleton tree at the given path.
+// If the directory already has content (e.g. rules.md exists), it skips scaffolding.
+func Scaffold(path string) error {
+	// If rules.md already exists, assume the directory is already scaffolded.
+	if _, err := os.Stat(filepath.Join(path, "rules.md")); err == nil {
+		return nil
+	}
+
+	dirs := []string{
+		"tasks",
+		"other",
+		filepath.Join("state", "review"),
+		filepath.Join("state", "merge"),
+		filepath.Join("state", "completed"),
+		filepath.Join("state", "abandoned"),
+		filepath.Join("milestone", "history"),
+	}
+
+	for _, d := range dirs {
+		if err := os.MkdirAll(filepath.Join(path, d), 0o750); err != nil {
+			return fmt.Errorf("creating directory %s: %w", d, err)
+		}
+	}
+
+	placeholders := map[string]string{
+		"rules.md":                            "",
+		"lint.md":                             "",
+		"functional.md":                       "",
+		"hydra.yml":                           "commands:\n  # lint: \"golangci-lint run ./...\"\n  # test: \"go test ./... -count=1\"\n",
+		filepath.Join("state", "record.json"): "[]\n",
+	}
+
+	for name, content := range placeholders {
+		p := filepath.Join(path, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			return fmt.Errorf("creating %s: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
 // AssembleDocument builds a single markdown document from rules, lint, task content, and functional specs.
 func (d *Dir) AssembleDocument(taskContent string) (string, error) {
 	rules, err := d.Rules()

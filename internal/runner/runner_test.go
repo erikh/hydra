@@ -47,6 +47,12 @@ func setupTestEnv(t *testing.T) *testEnv {
 	mkdirAll(t, filepath.Join(designDir, "tasks", "backend"))
 	writeFile(t, filepath.Join(designDir, "tasks", "backend", "add-api.md"), "Build API.")
 
+	// Create hydra.yml with passing commands.
+	writeFile(t, filepath.Join(designDir, "hydra.yml"), "commands:\n  test: \"true\"\n  lint: \"true\"\n")
+
+	// Create state dir for record.json.
+	mkdirAll(t, filepath.Join(designDir, "state"))
+
 	// Create bare remote.
 	bareDir := filepath.Join(t.TempDir(), "remote.git")
 	gitRun(t, "init", "--bare", bareDir)
@@ -456,5 +462,99 @@ func TestRunTaskStateAfterMultipleRuns(t *testing.T) {
 	}
 	if pending[0].Name != "add-api" {
 		t.Errorf("remaining task = %q, want add-api", pending[0].Name)
+	}
+}
+
+func TestRunWithFailingTest(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Override hydra.yml with a failing test command.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"), "commands:\n  test: \"false\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	err = r.Run("add-feature")
+	if err == nil {
+		t.Fatal("expected error when test command fails")
+	}
+	if !strings.Contains(err.Error(), "test step failed") {
+		t.Errorf("error = %q, want test step failed message", err)
+	}
+}
+
+func TestRunWithFailingLint(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Override hydra.yml with a failing lint command.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"), "commands:\n  test: \"true\"\n  lint: \"false\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	err = r.Run("add-feature")
+	if err == nil {
+		t.Fatal("expected error when lint command fails")
+	}
+	if !strings.Contains(err.Error(), "lint step failed") {
+		t.Errorf("error = %q, want lint step failed message", err)
+	}
+}
+
+func TestRunRecordsSHA(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify record.json was created with the correct entry.
+	recordPath := filepath.Join(env.DesignDir, "state", "record.json")
+	data, err := os.ReadFile(recordPath) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading record.json: %v", err)
+	}
+
+	var entries []map[string]string
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("parsing record.json: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 record entry, got %d", len(entries))
+	}
+	if entries[0]["task_name"] != "add-feature" {
+		t.Errorf("task_name = %q, want add-feature", entries[0]["task_name"])
+	}
+	if entries[0]["sha"] == "" {
+		t.Error("SHA is empty in record")
+	}
+
+	// Verify the recorded SHA matches the actual commit.
+	out, err := exec.CommandContext(context.Background(), "git", "-C", env.RepoDir, "rev-parse", "HEAD").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+	actualSHA := strings.TrimSpace(string(out))
+	if entries[0]["sha"] != actualSHA {
+		t.Errorf("recorded SHA = %q, actual = %q", entries[0]["sha"], actualSHA)
 	}
 }

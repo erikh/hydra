@@ -38,6 +38,81 @@ func must(t *testing.T, err error) {
 	}
 }
 
+func TestScaffoldCreatesStructure(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := Scaffold(dir); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+
+	// Verify all directories exist.
+	for _, d := range []string{
+		"tasks",
+		"other",
+		filepath.Join("state", "review"),
+		filepath.Join("state", "merge"),
+		filepath.Join("state", "completed"),
+		filepath.Join("state", "abandoned"),
+		filepath.Join("milestone", "history"),
+	} {
+		info, err := os.Stat(filepath.Join(dir, d))
+		if err != nil {
+			t.Errorf("directory %s not created: %v", d, err)
+			continue
+		}
+		if !info.IsDir() {
+			t.Errorf("%s is not a directory", d)
+		}
+	}
+
+	// Verify all files exist.
+	for _, f := range []string{
+		"rules.md",
+		"lint.md",
+		"functional.md",
+		"hydra.yml",
+		filepath.Join("state", "record.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("file %s not created: %v", f, err)
+		}
+	}
+
+	// Verify record.json contains empty array.
+	data, err := os.ReadFile(filepath.Join(dir, "state", "record.json")) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading record.json: %v", err)
+	}
+	if string(data) != "[]\n" {
+		t.Errorf("record.json = %q, want %q", string(data), "[]\n")
+	}
+}
+
+func TestScaffoldSkipsExisting(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create rules.md with content before scaffolding.
+	must(t, os.WriteFile(filepath.Join(dir, "rules.md"), []byte("My custom rules."), 0o600))
+
+	if err := Scaffold(dir); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+
+	// Verify rules.md content is preserved.
+	data, err := os.ReadFile(filepath.Join(dir, "rules.md")) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading rules.md: %v", err)
+	}
+	if string(data) != "My custom rules." {
+		t.Errorf("rules.md = %q, want %q", string(data), "My custom rules.")
+	}
+
+	// Verify other scaffold files were NOT created (since we skipped).
+	if _, err := os.Stat(filepath.Join(dir, "hydra.yml")); !os.IsNotExist(err) {
+		t.Error("hydra.yml should not exist when scaffolding is skipped")
+	}
+}
+
 func TestNewDir(t *testing.T) {
 	dir := setupDesignDir(t)
 
@@ -455,5 +530,141 @@ func TestNonMdFilesIgnored(t *testing.T) {
 	}
 	if tasks[0].Name != "real-task" {
 		t.Errorf("Name = %q, want real-task", tasks[0].Name)
+	}
+}
+
+func TestRecordAddAndEntries(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := NewRecord(dir)
+
+	// Initially empty.
+	entries, err := rec.Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+
+	// Add entries.
+	if err := rec.Add("abc123", "add-feature"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := rec.Add("def456", "fix-bug"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	entries, err = rec.Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].SHA != "abc123" || entries[0].TaskName != "add-feature" {
+		t.Errorf("entry[0] = %+v", entries[0])
+	}
+	if entries[1].SHA != "def456" || entries[1].TaskName != "fix-bug" {
+		t.Errorf("entry[1] = %+v", entries[1])
+	}
+}
+
+func TestMilestones(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(dir, "milestone"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "milestone", "2025-01-15.md"), []byte("Q1 milestone"), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "milestone", "2025-06-01.md"), []byte("Q2 milestone"), 0o600))
+
+	dd, _ := NewDir(dir)
+	milestones, err := dd.Milestones()
+	if err != nil {
+		t.Fatalf("Milestones: %v", err)
+	}
+	if len(milestones) != 2 {
+		t.Fatalf("expected 2 milestones, got %d", len(milestones))
+	}
+
+	dates := map[string]bool{}
+	for _, m := range milestones {
+		dates[m.Date] = true
+	}
+	if !dates["2025-01-15"] || !dates["2025-06-01"] {
+		t.Errorf("milestones = %v", milestones)
+	}
+}
+
+func TestMilestonesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	dd, _ := NewDir(dir)
+
+	milestones, err := dd.Milestones()
+	if err != nil {
+		t.Fatalf("Milestones: %v", err)
+	}
+	if len(milestones) != 0 {
+		t.Errorf("expected 0 milestones, got %d", len(milestones))
+	}
+}
+
+func TestMilestoneHistory(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(dir, "milestone", "history"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "milestone", "history", "2025-01-15-A.md"), []byte("Great"), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "milestone", "history", "2025-06-01-C.md"), []byte("OK"), 0o600))
+
+	dd, _ := NewDir(dir)
+	history, err := dd.MilestoneHistory()
+	if err != nil {
+		t.Fatalf("MilestoneHistory: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 history entries, got %d", len(history))
+	}
+
+	found := map[string]string{}
+	for _, h := range history {
+		found[h.Date] = h.Score
+	}
+	if found["2025-01-15"] != "A" {
+		t.Errorf("2025-01-15 score = %q, want A", found["2025-01-15"])
+	}
+	if found["2025-06-01"] != "C" {
+		t.Errorf("2025-06-01 score = %q, want C", found["2025-06-01"])
+	}
+}
+
+func TestMilestoneHistoryEmpty(t *testing.T) {
+	dir := t.TempDir()
+	dd, _ := NewDir(dir)
+
+	history, err := dd.MilestoneHistory()
+	if err != nil {
+		t.Fatalf("MilestoneHistory: %v", err)
+	}
+	if len(history) != 0 {
+		t.Errorf("expected 0 history entries, got %d", len(history))
+	}
+}
+
+func TestRecordPersistence(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := NewRecord(dir)
+	if err := rec.Add("sha1", "task1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a new record instance pointing to the same file.
+	rec2 := NewRecord(dir)
+	entries, err := rec2.Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].SHA != "sha1" {
+		t.Errorf("SHA = %q, want sha1", entries[0].SHA)
 	}
 }
