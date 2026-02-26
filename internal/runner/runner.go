@@ -1,6 +1,8 @@
+// Package runner orchestrates the full hydra task lifecycle.
 package runner
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erikh/hydra/internal/config"
@@ -13,29 +15,32 @@ import (
 // It receives the repo working directory and the assembled document.
 type ClaudeFunc func(repoDir, document string) error
 
+// Runner orchestrates the full hydra run workflow.
 type Runner struct {
-	Config    *config.Config
-	DesignDir *design.DesignDir
-	Repo      *repo.Repo
-	Claude    ClaudeFunc
-	BaseDir   string // working directory for lock file; defaults to "."
+	Config  *config.Config
+	Design  *design.Dir
+	Repo    *repo.Repo
+	Claude  ClaudeFunc
+	BaseDir string // working directory for lock file; defaults to "."
 }
 
+// New creates a Runner from the given config.
 func New(cfg *config.Config) (*Runner, error) {
-	dd, err := design.NewDesignDir(cfg.DesignDir)
+	dd, err := design.NewDir(cfg.DesignDir)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Runner{
-		Config:    cfg,
-		DesignDir: dd,
-		Repo:      repo.Open(cfg.RepoDir),
-		Claude:    invokeClaude,
-		BaseDir:   ".",
+		Config:  cfg,
+		Design:  dd,
+		Repo:    repo.Open(cfg.RepoDir),
+		Claude:  invokeClaude,
+		BaseDir: ".",
 	}, nil
 }
 
+// Run executes the full task lifecycle: lock, branch, assemble, claude, commit, push, move to review.
 func (r *Runner) Run(taskName string) error {
 	baseDir := r.BaseDir
 	if baseDir == "" {
@@ -44,7 +49,7 @@ func (r *Runner) Run(taskName string) error {
 	hydraDir := config.HydraPath(baseDir)
 
 	// Find the task
-	task, err := r.DesignDir.FindTask(taskName)
+	task, err := r.Design.FindTask(taskName)
 	if err != nil {
 		return err
 	}
@@ -54,7 +59,7 @@ func (r *Runner) Run(taskName string) error {
 	if err := lk.Acquire(); err != nil {
 		return err
 	}
-	defer lk.Release()
+	defer func() { _ = lk.Release() }()
 
 	// Create and checkout branch
 	branch := task.BranchName()
@@ -68,7 +73,7 @@ func (r *Runner) Run(taskName string) error {
 		return err
 	}
 
-	doc, err := r.DesignDir.AssembleDocument(content)
+	doc, err := r.Design.AssembleDocument(content)
 	if err != nil {
 		return fmt.Errorf("assembling document: %w", err)
 	}
@@ -88,7 +93,7 @@ func (r *Runner) Run(taskName string) error {
 		return fmt.Errorf("checking for changes: %w", err)
 	}
 	if !hasChanges {
-		return fmt.Errorf("claude produced no changes")
+		return errors.New("claude produced no changes")
 	}
 
 	// Commit and push
@@ -97,7 +102,7 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	sign := r.Repo.HasSigningKey()
-	commitMsg := fmt.Sprintf("hydra: %s", taskName)
+	commitMsg := "hydra: " + taskName
 	if err := r.Repo.Commit(commitMsg, sign); err != nil {
 		return fmt.Errorf("committing: %w", err)
 	}
@@ -107,7 +112,7 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	// Move task to review
-	if err := r.DesignDir.MoveTask(task, design.StateReview); err != nil {
+	if err := r.Design.MoveTask(task, design.StateReview); err != nil {
 		return fmt.Errorf("moving task to review: %w", err)
 	}
 

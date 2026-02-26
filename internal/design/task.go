@@ -7,16 +7,23 @@ import (
 	"strings"
 )
 
+// TaskState represents the lifecycle state of a task.
 type TaskState string
 
 const (
-	StatePending   TaskState = "pending"
-	StateReview    TaskState = "review"
-	StateMerge     TaskState = "merge"
+	// StatePending is a task that has not yet been run.
+	StatePending TaskState = "pending"
+	// StateReview is a task that has been run and is awaiting review.
+	StateReview TaskState = "review"
+	// StateMerge is a task that has passed review and is ready to merge.
+	StateMerge TaskState = "merge"
+	// StateCompleted is a task that has completed the full lifecycle.
 	StateCompleted TaskState = "completed"
+	// StateAbandoned is a task that has been abandoned.
 	StateAbandoned TaskState = "abandoned"
 )
 
+// Task represents a single design task.
 type Task struct {
 	Name     string
 	FilePath string
@@ -24,6 +31,7 @@ type Task struct {
 	State    TaskState
 }
 
+// Content reads and returns the task's markdown content.
 func (t *Task) Content() (string, error) {
 	data, err := os.ReadFile(t.FilePath)
 	if err != nil {
@@ -32,6 +40,7 @@ func (t *Task) Content() (string, error) {
 	return string(data), nil
 }
 
+// BranchName returns the normalized git branch name for this task.
 func (t *Task) BranchName() string {
 	name := t.Name
 	if t.Group != "" {
@@ -42,7 +51,7 @@ func (t *Task) BranchName() string {
 	return "hydra/" + normalized
 }
 
-func (d *DesignDir) discoverTasks(dir string, group string, state TaskState) ([]Task, error) {
+func (d *Dir) discoverTasks(dir string, group string, state TaskState) ([]Task, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -84,11 +93,13 @@ func (d *DesignDir) discoverTasks(dir string, group string, state TaskState) ([]
 	return tasks, nil
 }
 
-func (d *DesignDir) PendingTasks() ([]Task, error) {
+// PendingTasks returns all tasks in the tasks/ directory.
+func (d *Dir) PendingTasks() ([]Task, error) {
 	return d.discoverTasks(filepath.Join(d.Path, "tasks"), "", StatePending)
 }
 
-func (d *DesignDir) TasksByState(state TaskState) ([]Task, error) {
+// TasksByState returns all tasks in the given state.
+func (d *Dir) TasksByState(state TaskState) ([]Task, error) {
 	switch state {
 	case StatePending:
 		return d.PendingTasks()
@@ -99,7 +110,8 @@ func (d *DesignDir) TasksByState(state TaskState) ([]Task, error) {
 	}
 }
 
-func (d *DesignDir) AllTasks() ([]Task, error) {
+// AllTasks returns tasks across all states.
+func (d *Dir) AllTasks() ([]Task, error) {
 	var all []Task
 	for _, state := range []TaskState{StatePending, StateReview, StateMerge, StateCompleted, StateAbandoned} {
 		tasks, err := d.TasksByState(state)
@@ -111,7 +123,8 @@ func (d *DesignDir) AllTasks() ([]Task, error) {
 	return all, nil
 }
 
-func (d *DesignDir) FindTask(name string) (*Task, error) {
+// FindTask looks up a pending task by name or group/name.
+func (d *Dir) FindTask(name string) (*Task, error) {
 	tasks, err := d.PendingTasks()
 	if err != nil {
 		return nil, err
@@ -129,7 +142,8 @@ func (d *DesignDir) FindTask(name string) (*Task, error) {
 	return nil, fmt.Errorf("task %q not found in pending tasks", name)
 }
 
-func (d *DesignDir) MoveTask(task *Task, newState TaskState) error {
+// MoveTask moves a task file to the given state directory.
+func (d *Dir) MoveTask(task *Task, newState TaskState) error {
 	var destDir string
 	switch newState {
 	case StateReview, StateMerge, StateCompleted, StateAbandoned:
@@ -138,7 +152,7 @@ func (d *DesignDir) MoveTask(task *Task, newState TaskState) error {
 		return fmt.Errorf("cannot move task to state: %s", newState)
 	}
 
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
 	}
 

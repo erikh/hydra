@@ -11,32 +11,39 @@ func setupDesignDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	os.WriteFile(filepath.Join(dir, "rules.md"), []byte("Use Go idioms."), 0o644)
-	os.WriteFile(filepath.Join(dir, "lint.md"), []byte("Run gofmt."), 0o644)
-	os.WriteFile(filepath.Join(dir, "functional.md"), []byte("All tests pass."), 0o644)
+	must(t, os.WriteFile(filepath.Join(dir, "rules.md"), []byte("Use Go idioms."), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "lint.md"), []byte("Run gofmt."), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "functional.md"), []byte("All tests pass."), 0o600))
 
-	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
-	os.WriteFile(filepath.Join(dir, "tasks", "add-auth.md"), []byte("Add authentication."), 0o644)
-	os.WriteFile(filepath.Join(dir, "tasks", "fix-bug.md"), []byte("Fix the login bug."), 0o644)
+	must(t, os.MkdirAll(filepath.Join(dir, "tasks"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "add-auth.md"), []byte("Add authentication."), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "fix-bug.md"), []byte("Fix the login bug."), 0o600))
 
-	os.MkdirAll(filepath.Join(dir, "tasks", "backend"), 0o755)
-	os.WriteFile(filepath.Join(dir, "tasks", "backend", "add-api.md"), []byte("Add REST API."), 0o644)
+	must(t, os.MkdirAll(filepath.Join(dir, "tasks", "backend"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "backend", "add-api.md"), []byte("Add REST API."), 0o600))
 
-	os.MkdirAll(filepath.Join(dir, "state", "review"), 0o755)
-	os.WriteFile(filepath.Join(dir, "state", "review", "old-task.md"), []byte("Done."), 0o644)
+	must(t, os.MkdirAll(filepath.Join(dir, "state", "review"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "state", "review", "old-task.md"), []byte("Done."), 0o600))
 
-	os.MkdirAll(filepath.Join(dir, "state", "completed"), 0o755)
-	os.WriteFile(filepath.Join(dir, "state", "completed", "shipped.md"), []byte("Shipped."), 0o644)
+	must(t, os.MkdirAll(filepath.Join(dir, "state", "completed"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "state", "completed", "shipped.md"), []byte("Shipped."), 0o600))
 
 	return dir
 }
 
-func TestNewDesignDir(t *testing.T) {
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewDir(t *testing.T) {
 	dir := setupDesignDir(t)
 
-	dd, err := NewDesignDir(dir)
+	dd, err := NewDir(dir)
 	if err != nil {
-		t.Fatalf("NewDesignDir: %v", err)
+		t.Fatalf("NewDir: %v", err)
 	}
 
 	if dd.Path == "" {
@@ -44,18 +51,18 @@ func TestNewDesignDir(t *testing.T) {
 	}
 }
 
-func TestNewDesignDirNotExist(t *testing.T) {
-	_, err := NewDesignDir("/nonexistent/path/xyz")
+func TestNewDirNotExist(t *testing.T) {
+	_, err := NewDir("/nonexistent/path/xyz")
 	if err == nil {
 		t.Fatal("expected error for non-existent dir")
 	}
 }
 
-func TestNewDesignDirIsFile(t *testing.T) {
+func TestNewDirIsFile(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file.txt")
-	os.WriteFile(f, []byte("hi"), 0o644)
+	must(t, os.WriteFile(f, []byte("hi"), 0o600))
 
-	_, err := NewDesignDir(f)
+	_, err := NewDir(f)
 	if err == nil {
 		t.Fatal("expected error for file instead of dir")
 	}
@@ -63,7 +70,7 @@ func TestNewDesignDirIsFile(t *testing.T) {
 
 func TestRules(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	rules, err := dd.Rules()
 	if err != nil {
@@ -76,7 +83,7 @@ func TestRules(t *testing.T) {
 
 func TestLint(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	lint, err := dd.Lint()
 	if err != nil {
@@ -89,7 +96,7 @@ func TestLint(t *testing.T) {
 
 func TestFunctional(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	fn, err := dd.Functional()
 	if err != nil {
@@ -102,9 +109,9 @@ func TestFunctional(t *testing.T) {
 
 func TestMissingOptionalFiles(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
+	must(t, os.MkdirAll(filepath.Join(dir, "tasks"), 0o750))
 
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	rules, err := dd.Rules()
 	if err != nil {
@@ -133,7 +140,7 @@ func TestMissingOptionalFiles(t *testing.T) {
 
 func TestAssembleDocumentFull(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	doc, err := dd.AssembleDocument("Build the widget.")
 	if err != nil {
@@ -165,7 +172,7 @@ func TestAssembleDocumentFull(t *testing.T) {
 		t.Error("missing functional content")
 	}
 
-	// Verify ordering: Rules before Lint before Task before Functional
+	// Verify ordering: Rules before Lint before Task before Functional.
 	rulesIdx := strings.Index(doc, "# Rules")
 	lintIdx := strings.Index(doc, "# Lint Rules")
 	taskIdx := strings.Index(doc, "# Task")
@@ -178,9 +185,9 @@ func TestAssembleDocumentFull(t *testing.T) {
 
 func TestAssembleDocumentMinimal(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
+	must(t, os.MkdirAll(filepath.Join(dir, "tasks"), 0o750))
 
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	doc, err := dd.AssembleDocument("Do something.")
 	if err != nil {
@@ -203,7 +210,7 @@ func TestAssembleDocumentMinimal(t *testing.T) {
 
 func TestPendingTasks(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	tasks, err := dd.PendingTasks()
 	if err != nil {
@@ -232,7 +239,7 @@ func TestPendingTasks(t *testing.T) {
 
 func TestPendingTasksEmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	tasks, err := dd.PendingTasks()
 	if err != nil {
@@ -245,7 +252,7 @@ func TestPendingTasksEmptyDir(t *testing.T) {
 
 func TestTasksByState(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	review, err := dd.TasksByState(StateReview)
 	if err != nil {
@@ -263,7 +270,7 @@ func TestTasksByState(t *testing.T) {
 		t.Errorf("completed tasks = %v", completed)
 	}
 
-	// Empty states return empty slice
+	// Empty states return empty slice.
 	merge, err := dd.TasksByState(StateMerge)
 	if err != nil {
 		t.Fatalf("TasksByState merge: %v", err)
@@ -275,7 +282,7 @@ func TestTasksByState(t *testing.T) {
 
 func TestTasksByStateUnknown(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	_, err := dd.TasksByState("bogus")
 	if err == nil {
@@ -285,14 +292,14 @@ func TestTasksByStateUnknown(t *testing.T) {
 
 func TestAllTasks(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	all, err := dd.AllTasks()
 	if err != nil {
 		t.Fatalf("AllTasks: %v", err)
 	}
 
-	// 3 pending + 1 review + 1 completed = 5
+	// 3 pending + 1 review + 1 completed = 5.
 	if len(all) != 5 {
 		t.Errorf("expected 5 total tasks, got %d", len(all))
 	}
@@ -300,9 +307,9 @@ func TestAllTasks(t *testing.T) {
 
 func TestFindTask(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
-	// Find by plain name
+	// Find by plain name.
 	task, err := dd.FindTask("add-auth")
 	if err != nil {
 		t.Fatalf("FindTask add-auth: %v", err)
@@ -314,7 +321,7 @@ func TestFindTask(t *testing.T) {
 		t.Errorf("Group = %q, want empty", task.Group)
 	}
 
-	// Find by group/name
+	// Find by group/name.
 	task, err = dd.FindTask("backend/add-api")
 	if err != nil {
 		t.Fatalf("FindTask backend/add-api: %v", err)
@@ -329,7 +336,7 @@ func TestFindTask(t *testing.T) {
 
 func TestFindTaskNotFound(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	_, err := dd.FindTask("nonexistent")
 	if err == nil {
@@ -339,7 +346,7 @@ func TestFindTaskNotFound(t *testing.T) {
 
 func TestTaskContent(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	task, _ := dd.FindTask("add-auth")
 	content, err := task.Content()
@@ -374,7 +381,7 @@ func TestBranchName(t *testing.T) {
 
 func TestMoveTask(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	task, _ := dd.FindTask("add-auth")
 	originalPath := task.FilePath
@@ -383,12 +390,12 @@ func TestMoveTask(t *testing.T) {
 		t.Fatalf("MoveTask: %v", err)
 	}
 
-	// Original file should be gone
+	// Original file should be gone.
 	if _, err := os.Stat(originalPath); !os.IsNotExist(err) {
 		t.Error("original file still exists")
 	}
 
-	// Task should be at new location
+	// Task should be at new location.
 	if _, err := os.Stat(task.FilePath); err != nil {
 		t.Errorf("new file doesn't exist: %v", err)
 	}
@@ -407,7 +414,7 @@ func TestMoveTaskAllStates(t *testing.T) {
 	for _, state := range []TaskState{StateReview, StateMerge, StateCompleted, StateAbandoned} {
 		t.Run(string(state), func(t *testing.T) {
 			dir := setupDesignDir(t)
-			dd, _ := NewDesignDir(dir)
+			dd, _ := NewDir(dir)
 
 			task, _ := dd.FindTask("fix-bug")
 			if err := dd.MoveTask(task, state); err != nil {
@@ -422,7 +429,7 @@ func TestMoveTaskAllStates(t *testing.T) {
 
 func TestMoveTaskInvalidState(t *testing.T) {
 	dir := setupDesignDir(t)
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 
 	task, _ := dd.FindTask("fix-bug")
 	err := dd.MoveTask(task, "bogus")
@@ -433,12 +440,12 @@ func TestMoveTaskInvalidState(t *testing.T) {
 
 func TestNonMdFilesIgnored(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
-	os.WriteFile(filepath.Join(dir, "tasks", "real-task.md"), []byte("task"), 0o644)
-	os.WriteFile(filepath.Join(dir, "tasks", "notes.txt"), []byte("not a task"), 0o644)
-	os.WriteFile(filepath.Join(dir, "tasks", ".hidden"), []byte("hidden"), 0o644)
+	must(t, os.MkdirAll(filepath.Join(dir, "tasks"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "real-task.md"), []byte("task"), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "notes.txt"), []byte("not a task"), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", ".hidden"), []byte("hidden"), 0o600))
 
-	dd, _ := NewDesignDir(dir)
+	dd, _ := NewDir(dir)
 	tasks, err := dd.PendingTasks()
 	if err != nil {
 		t.Fatalf("PendingTasks: %v", err)

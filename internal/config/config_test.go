@@ -15,8 +15,8 @@ func TestHydraPath(t *testing.T) {
 	}
 }
 
-func TestConfigPath(t *testing.T) {
-	got := ConfigPath("/tmp/project")
+func TestPath(t *testing.T) {
+	got := Path("/tmp/project")
 	want := filepath.Join("/tmp/project", HydraDir, ConfigFile)
 	if got != want {
 		t.Errorf("ConfigPath = %q, want %q", got, want)
@@ -56,7 +56,7 @@ func TestInitCreatesDirectoryAndConfig(t *testing.T) {
 	}
 
 	// Verify config file exists and is valid JSON
-	data, err := os.ReadFile(ConfigPath(base))
+	data, err := os.ReadFile(Path(base))
 	if err != nil {
 		t.Fatalf("config file not created: %v", err)
 	}

@@ -7,17 +7,22 @@ import (
 	"testing"
 )
 
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAcquireAndRelease(t *testing.T) {
 	dir := t.TempDir()
 
 	lk := New(dir, "test-task")
-	if err := lk.Acquire(); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
+	must(t, lk.Acquire())
 
-	// Lock file should exist
+	// Lock file should exist.
 	lockPath := filepath.Join(dir, LockFile)
-	data, err := os.ReadFile(lockPath)
+	data, err := os.ReadFile(lockPath) //nolint:gosec // test reads from temp dir
 	if err != nil {
 		t.Fatalf("lock file not created: %v", err)
 	}
@@ -34,9 +39,7 @@ func TestAcquireAndRelease(t *testing.T) {
 		t.Errorf("TaskName = %q, want test-task", ld.TaskName)
 	}
 
-	if err := lk.Release(); err != nil {
-		t.Fatalf("Release: %v", err)
-	}
+	must(t, lk.Release())
 
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Error("lock file still exists after Release")
@@ -46,40 +49,44 @@ func TestAcquireAndRelease(t *testing.T) {
 func TestAcquireBlockedByLiveLock(t *testing.T) {
 	dir := t.TempDir()
 
-	// First lock (our own PID, so it's alive)
+	// First lock (our own PID, so it's alive).
 	lk1 := New(dir, "task-1")
-	if err := lk1.Acquire(); err != nil {
-		t.Fatalf("first Acquire: %v", err)
-	}
+	must(t, lk1.Acquire())
 
-	// Second lock should fail
+	// Second lock should fail.
 	lk2 := New(dir, "task-2")
 	err := lk2.Acquire()
 	if err == nil {
 		t.Fatal("expected error when lock is held by live process")
 	}
 
-	lk1.Release()
+	must(t, lk1.Release())
 }
 
 func TestAcquireStaleLock(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write a lock with a PID that definitely doesn't exist
-	// PID 2^22 is unlikely to be running and is valid on Linux
+	// Write a lock with a PID that definitely doesn't exist.
 	stalePID := 4194304
-	data, _ := json.Marshal(&lockData{PID: stalePID, TaskName: "stale-task"})
-	os.WriteFile(filepath.Join(dir, LockFile), data, 0o644)
+	data, err := json.Marshal(&lockData{PID: stalePID, TaskName: "stale-task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(t, os.WriteFile(filepath.Join(dir, LockFile), data, 0o600))
 
 	lk := New(dir, "new-task")
-	if err := lk.Acquire(); err != nil {
-		t.Fatalf("Acquire with stale lock should succeed: %v", err)
+	must(t, lk.Acquire())
+
+	// Verify we now hold the lock.
+	readData, err := os.ReadFile(filepath.Join(dir, LockFile)) //nolint:gosec // test reads from temp dir
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Verify we now hold the lock
-	readData, _ := os.ReadFile(filepath.Join(dir, LockFile))
 	var ld lockData
-	json.Unmarshal(readData, &ld)
+	if err := json.Unmarshal(readData, &ld); err != nil {
+		t.Fatal(err)
+	}
 
 	if ld.PID != os.Getpid() {
 		t.Errorf("PID = %d, want %d", ld.PID, os.Getpid())
@@ -88,32 +95,28 @@ func TestAcquireStaleLock(t *testing.T) {
 		t.Errorf("TaskName = %q, want new-task", ld.TaskName)
 	}
 
-	lk.Release()
+	must(t, lk.Release())
 }
 
 func TestReleaseIdempotent(t *testing.T) {
 	dir := t.TempDir()
 
 	lk := New(dir, "test-task")
-	// Release without Acquire should not error
-	if err := lk.Release(); err != nil {
-		t.Fatalf("Release without Acquire: %v", err)
-	}
+	// Release without Acquire should not error.
+	must(t, lk.Release())
 
-	// Double release
-	lk.Acquire()
-	lk.Release()
-	if err := lk.Release(); err != nil {
-		t.Fatalf("double Release: %v", err)
-	}
+	// Double release.
+	must(t, lk.Acquire())
+	must(t, lk.Release())
+	must(t, lk.Release())
 }
 
 func TestReadCurrent(t *testing.T) {
 	dir := t.TempDir()
 
 	lk := New(dir, "running-task")
-	lk.Acquire()
-	defer lk.Release()
+	must(t, lk.Acquire())
+	defer func() { must(t, lk.Release()) }()
 
 	taskName, pid, err := ReadCurrent(dir)
 	if err != nil {
@@ -141,10 +144,13 @@ func TestReadCurrentStaleLock(t *testing.T) {
 	dir := t.TempDir()
 
 	stalePID := 4194304
-	data, _ := json.Marshal(&lockData{PID: stalePID, TaskName: "stale"})
-	os.WriteFile(filepath.Join(dir, LockFile), data, 0o644)
+	data, err := json.Marshal(&lockData{PID: stalePID, TaskName: "stale"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(t, os.WriteFile(filepath.Join(dir, LockFile), data, 0o600))
 
-	_, _, err := ReadCurrent(dir)
+	_, _, err = ReadCurrent(dir)
 	if err == nil {
 		t.Fatal("expected error for stale lock")
 	}

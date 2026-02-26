@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,11 +12,16 @@ import (
 func initBareRemote(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "remote.git")
-	cmd := exec.Command("git", "init", "--bare", dir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init --bare: %v\n%s", err, out)
-	}
+	gitRun(t, "init", "--bare", dir)
 	return dir
+}
+
+func gitRun(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
 }
 
 // initLocalRepo creates a local git repo with an initial commit and a remote pointing to bare.
@@ -23,30 +29,27 @@ func initLocalRepo(t *testing.T, bare string) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	cmds := [][]string{
-		{"git", "init", dir},
-		{"git", "-C", dir, "config", "user.email", "test@test.com"},
-		{"git", "-C", dir, "config", "user.name", "Test"},
-		{"git", "-C", dir, "config", "commit.gpgsign", "false"},
-	}
+	gitRun(t, "init", dir)
+	gitRun(t, "-C", dir, "config", "user.email", "test@test.com")
+	gitRun(t, "-C", dir, "config", "user.name", "Test")
+	gitRun(t, "-C", dir, "config", "commit.gpgsign", "false")
 
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", args, err, out)
-		}
+	// Create initial commit.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-
-	// Create initial commit
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test"), 0o644)
-	exec.Command("git", "-C", dir, "add", "-A").Run()
-	exec.Command("git", "-C", dir, "commit", "-m", "initial").Run()
+	gitRun(t, "-C", dir, "add", "-A")
+	gitRun(t, "-C", dir, "commit", "-m", "initial")
 
 	if bare != "" {
-		exec.Command("git", "-C", dir, "remote", "add", "origin", bare).Run()
-		exec.Command("git", "-C", dir, "push", "-u", "origin", "main").Run()
-		// If main didn't work (older git default is master), try master
-		exec.Command("git", "-C", dir, "push", "-u", "origin", "master").Run()
+		gitRun(t, "-C", dir, "remote", "add", "origin", bare)
+		// Push whatever the default branch is.
+		out, err := exec.CommandContext(context.Background(), "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test with controlled args
+		if err != nil {
+			t.Fatalf("getting branch: %v", err)
+		}
+		branch := string(out[:len(out)-1]) // trim newline
+		gitRun(t, "-C", dir, "push", "-u", "origin", branch)
 	}
 
 	return dir
@@ -66,7 +69,7 @@ func TestClone(t *testing.T) {
 		t.Errorf("Dir = %q, want %q", r.Dir, dest)
 	}
 
-	// Verify it's a git repo
+	// Verify it's a git repo.
 	if _, err := os.Stat(filepath.Join(dest, ".git")); err != nil {
 		t.Error(".git directory not found in clone")
 	}
@@ -108,10 +111,15 @@ func TestCheckout(t *testing.T) {
 	dir := initLocalRepo(t, "")
 	r := Open(dir)
 
-	// Get current branch name
-	origBranch, _ := r.CurrentBranch()
+	// Get current branch name.
+	origBranch, err := r.CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
 
-	r.CreateBranch("hydra/feature")
+	if err := r.CreateBranch("hydra/feature"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
 	if err := r.Checkout(origBranch); err != nil {
 		t.Fatalf("Checkout: %v", err)
 	}
@@ -126,7 +134,7 @@ func TestHasChanges(t *testing.T) {
 	dir := initLocalRepo(t, "")
 	r := Open(dir)
 
-	// No changes initially
+	// No changes initially.
 	has, err := r.HasChanges()
 	if err != nil {
 		t.Fatalf("HasChanges: %v", err)
@@ -135,8 +143,10 @@ func TestHasChanges(t *testing.T) {
 		t.Error("expected no changes initially")
 	}
 
-	// Create a file
-	os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0o644)
+	// Create a file.
+	if err := os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	has, err = r.HasChanges()
 	if err != nil {
@@ -151,7 +161,9 @@ func TestAddAllAndCommit(t *testing.T) {
 	dir := initLocalRepo(t, "")
 	r := Open(dir)
 
-	os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := r.AddAll(); err != nil {
 		t.Fatalf("AddAll: %v", err)
@@ -161,7 +173,7 @@ func TestAddAllAndCommit(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	// No changes after commit
+	// No changes after commit.
 	has, _ := r.HasChanges()
 	if has {
 		t.Error("expected no changes after commit")
@@ -172,14 +184,15 @@ func TestCommitSigned(t *testing.T) {
 	dir := initLocalRepo(t, "")
 	r := Open(dir)
 
-	os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0o644)
-	r.AddAll()
+	if err := os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddAll(); err != nil {
+		t.Fatal(err)
+	}
 
-	// Commit with sign=true will fail without a signing key, which is expected
-	err := r.Commit("signed commit", true)
-	// We just verify the command was attempted — it fails without GPG setup
-	// which is fine for a test environment
-	_ = err
+	// Commit with sign=true will fail without a signing key, which is expected.
+	_ = r.Commit("signed commit", true)
 }
 
 func TestPush(t *testing.T) {
@@ -187,10 +200,18 @@ func TestPush(t *testing.T) {
 	local := initLocalRepo(t, bare)
 	r := Open(local)
 
-	r.CreateBranch("hydra/push-test")
-	os.WriteFile(filepath.Join(local, "pushed.txt"), []byte("data"), 0o644)
-	r.AddAll()
-	r.Commit("push test", false)
+	if err := r.CreateBranch("hydra/push-test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(local, "pushed.txt"), []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Commit("push test", false); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := r.Push("hydra/push-test"); err != nil {
 		t.Fatalf("Push: %v", err)
@@ -208,7 +229,7 @@ func TestHasSigningKeyFalse(t *testing.T) {
 
 func TestHasSigningKeyTrue(t *testing.T) {
 	dir := initLocalRepo(t, "")
-	exec.Command("git", "-C", dir, "config", "user.signingkey", "ABCDEF1234567890").Run()
+	gitRun(t, "-C", dir, "config", "user.signingkey", "ABCDEF1234567890")
 
 	r := Open(dir)
 	if !r.HasSigningKey() {

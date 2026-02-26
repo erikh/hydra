@@ -1,3 +1,4 @@
+// Package design handles reading and assembling design directory documents.
 package design
 
 import (
@@ -6,11 +7,13 @@ import (
 	"path/filepath"
 )
 
-type DesignDir struct {
+// Dir represents a design directory containing rules, lint, functional specs, and tasks.
+type Dir struct {
 	Path string
 }
 
-func NewDesignDir(path string) (*DesignDir, error) {
+// NewDir opens and validates a design directory at the given path.
+func NewDir(path string) (*Dir, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolving design dir: %w", err)
@@ -25,11 +28,11 @@ func NewDesignDir(path string) (*DesignDir, error) {
 		return nil, fmt.Errorf("%s is not a directory", abs)
 	}
 
-	return &DesignDir{Path: abs}, nil
+	return &Dir{Path: abs}, nil
 }
 
-func (d *DesignDir) readFile(name string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(d.Path, name))
+func (d *Dir) readFile(name string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(d.Path, name)) //nolint:gosec // paths are constructed from trusted design dir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -39,19 +42,23 @@ func (d *DesignDir) readFile(name string) (string, error) {
 	return string(data), nil
 }
 
-func (d *DesignDir) Rules() (string, error) {
+// Rules returns the content of rules.md, or empty string if it doesn't exist.
+func (d *Dir) Rules() (string, error) {
 	return d.readFile("rules.md")
 }
 
-func (d *DesignDir) Lint() (string, error) {
+// Lint returns the content of lint.md, or empty string if it doesn't exist.
+func (d *Dir) Lint() (string, error) {
 	return d.readFile("lint.md")
 }
 
-func (d *DesignDir) Functional() (string, error) {
+// Functional returns the content of functional.md, or empty string if it doesn't exist.
+func (d *Dir) Functional() (string, error) {
 	return d.readFile("functional.md")
 }
 
-func (d *DesignDir) AssembleDocument(taskContent string) (string, error) {
+// AssembleDocument builds a single markdown document from rules, lint, task content, and functional specs.
+func (d *Dir) AssembleDocument(taskContent string) (string, error) {
 	rules, err := d.Rules()
 	if err != nil {
 		return "", err

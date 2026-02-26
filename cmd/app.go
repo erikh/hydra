@@ -1,6 +1,8 @@
+// Package cmd defines the hydra CLI commands.
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+// NewApp creates the hydra CLI application.
 func NewApp() *cli.App {
 	return &cli.App{
 		Name:  "hydra",
@@ -32,7 +35,7 @@ func initCommand() *cli.Command {
 		ArgsUsage: "<source-repo-url> <design-dir>",
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 2 {
-				return fmt.Errorf("usage: hydra init <source-repo-url> <design-dir>")
+				return errors.New("usage: hydra init <source-repo-url> <design-dir>")
 			}
 
 			sourceURL := c.Args().Get(0)
@@ -73,7 +76,7 @@ func runCommand() *cli.Command {
 		ArgsUsage: "<task-name>",
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 1 {
-				return fmt.Errorf("usage: hydra run <task-name>")
+				return errors.New("usage: hydra run <task-name>")
 			}
 
 			cfg, err := config.Load(".")
@@ -95,13 +98,13 @@ func statusCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "status",
 		Usage: "Show task states and current running task",
-		Action: func(c *cli.Context) error {
+		Action: func(_ *cli.Context) error {
 			cfg, err := config.Load(".")
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
 
-			dd, err := design.NewDesignDir(cfg.DesignDir)
+			dd, err := design.NewDir(cfg.DesignDir)
 			if err != nil {
 				return err
 			}
@@ -148,13 +151,13 @@ func listCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "list",
 		Usage: "List available pending tasks",
-		Action: func(c *cli.Context) error {
+		Action: func(_ *cli.Context) error {
 			cfg, err := config.Load(".")
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
 
-			dd, err := design.NewDesignDir(cfg.DesignDir)
+			dd, err := design.NewDir(cfg.DesignDir)
 			if err != nil {
 				return err
 			}
