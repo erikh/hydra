@@ -2007,8 +2007,8 @@ func TestReviewDevContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = r.ReviewDev(ctx, "add-feature")
-	if err == nil {
-		t.Fatal("expected error when context is cancelled")
+	// Should return nil (friendly message printed instead of error).
+	if err = r.ReviewDev(ctx, "add-feature"); err != nil {
+		t.Fatalf("ReviewDev should return nil on cancellation, got: %v", err)
 	}
 }

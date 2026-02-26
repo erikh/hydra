@@ -37,7 +37,12 @@ func (r *Runner) ReviewDev(ctx context.Context, taskName string) error {
 		return errors.New("no dev command configured in hydra.yml and no dev target in Makefile")
 	}
 
-	return r.TaskRunner.RunDev(ctx, wd)
+	err = r.TaskRunner.RunDev(ctx, wd)
+	if err != nil && ctx.Err() != nil {
+		fmt.Println("\nDev server stopped.")
+		return nil //nolint:nilerr // intentional: replace signal error with friendly message
+	}
+	return err
 }
 
 // Review runs an interactive review session on a task in review state.
