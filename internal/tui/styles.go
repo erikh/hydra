@@ -143,6 +143,15 @@ func (t Theme) DiffHeaderStyle() lipgloss.Style {
 }
 
 // ChromaStyle returns a chroma syntax-highlighting style derived from the theme.
+// When pywal is active (~/.cache/wal/colors.json exists), the style
+// automatically uses the pywal palette via LoadTheme. The mapping is:
+//
+//	color1 (Error)     → keywords, operators
+//	color2 (Success)   → strings, attributes
+//	color3 (Warning)   → literals, dates
+//	color4 (Accent)    → tags, builtins, headings
+//	color5 (Highlight) → numbers
+//	color8 (Muted)     → comments
 func (t Theme) ChromaStyle() *chroma.Style {
 	bg := string(t.Bg)
 	fg := string(t.Fg)

@@ -410,6 +410,9 @@ func statusCommand() *cli.Command {
 			"(running, pending, review, merge, completed, abandoned). " +
 			"Running tasks are keyed by name with 'action' and 'pid' fields. " +
 			"Default format is YAML; pass -j/--json for JSON.\n\n" +
+			"When stdout is a TTY, output is syntax-highlighted. Colors are " +
+			"sourced from pywal (~/.cache/wal/colors.json) when available, " +
+			"otherwise a built-in theme is used. Pass --no-color to disable.\n\n" +
 			"Example YAML output:\n\n" +
 			"  running:\n" +
 			"    my-task:\n" +
