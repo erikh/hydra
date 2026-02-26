@@ -38,9 +38,6 @@ func verificationSection(commands map[string]string) string {
 		"work directory. Do not modify these commands to use fixed ports, shared temp files, " +
 		"or any global state that would conflict with parallel runs. " +
 		"All test and lint operations must be fully isolated to the current working tree.\n")
-
-	b.WriteString("\nDo NOT run any individual test files, test functions, or lint checks " +
-		"outside of these commands. Only use the exact commands listed above for all testing and linting.\n")
 	return b.String()
 }
 
@@ -49,10 +46,13 @@ func verificationSection(commands map[string]string) string {
 func commitInstructions(sign bool, commands map[string]string) string {
 	var b strings.Builder
 	b.WriteString("\n\n# Commit Instructions\n\n")
-	b.WriteString("After making all code changes, follow the steps below. " +
-		"The test and lint commands below are the project's official commands from hydra.yml. " +
-		"Do not run other commands to perform testing or linting. " +
-		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
+
+	b.WriteString("IMPORTANT: Do NOT run any individual test files, test functions, " +
+		"lint checks, or any other testing/linting tools manually. " +
+		"The ONLY test and lint commands you may run are the exact commands listed below " +
+		"from hydra.yml. Do not invoke test runners, linters, or type checkers in any other way.\n\n")
+
+	b.WriteString("After making all code changes, follow the steps below.\n\n")
 
 	step := 1
 	if testCmd, ok := commands["test"]; ok && testCmd != "" {
@@ -84,9 +84,7 @@ func commitInstructions(sign bool, commands map[string]string) string {
 
 	b.WriteString("\nIMPORTANT: You MUST commit your changes before finishing. ")
 	b.WriteString("The commit message should describe what was done, not just the task name. ")
-	b.WriteString("Do NOT add Co-Authored-By or any other trailers to the commit message. ")
-	b.WriteString("Do NOT run any individual test files, test functions, or lint checks " +
-		"outside of the commands listed above. Only use the exact commands above for all testing and linting.\n")
+	b.WriteString("Do NOT add Co-Authored-By or any other trailers to the commit message.\n")
 
 	return b.String()
 }

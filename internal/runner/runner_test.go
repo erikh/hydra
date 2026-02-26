@@ -1271,11 +1271,8 @@ func TestCommitInstructionsExclusiveCommands(t *testing.T) {
 		"lint": "golangci-lint run",
 	})
 
-	if !strings.Contains(result, "Do not run other commands") {
-		t.Error("missing exclusive commands directive in commit instructions")
-	}
-	if !strings.Contains(result, "listed below") {
-		t.Error("directive should reference commands listed below")
+	if !strings.Contains(result, "Do NOT run any individual test") {
+		t.Error("missing individual test prohibition in commit instructions")
 	}
 }
 
@@ -1300,11 +1297,8 @@ func TestMergeDocumentExclusiveCommands(t *testing.T) {
 	}
 	result := assembleMergeDocument("Task content", nil, cmds, false)
 
-	if !strings.Contains(result, "Do not run other commands") {
-		t.Error("missing exclusive commands directive in merge document")
-	}
-	if !strings.Contains(result, "listed below") {
-		t.Error("directive should reference commands listed below")
+	if !strings.Contains(result, "Do NOT run any individual test") {
+		t.Error("missing individual test prohibition in merge document")
 	}
 }
 
@@ -1335,8 +1329,8 @@ func TestRunDocumentExclusiveCommands(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if !strings.Contains(captured, "Do not run other commands") {
-		t.Error("run document missing exclusive commands directive")
+	if !strings.Contains(captured, "Do NOT run any individual test") {
+		t.Error("run document missing individual test prohibition")
 	}
 }
 
@@ -1362,8 +1356,8 @@ func TestReviewDocumentExclusiveCommands(t *testing.T) {
 		t.Fatalf("Review: %v", err)
 	}
 
-	if !strings.Contains(captured, "Do not run other commands") {
-		t.Error("review document missing exclusive commands directive")
+	if !strings.Contains(captured, "Do NOT run any individual test") {
+		t.Error("review document missing individual test prohibition")
 	}
 }
 
@@ -2275,20 +2269,18 @@ func TestNoBeforeHookSkipsSilently(t *testing.T) {
 }
 
 func TestDocumentsProhibitIndividualTestLint(t *testing.T) {
-	// Verify that verificationSection and commitInstructions contain
-	// the directive prohibiting individual test/lint runs.
-	cmds := map[string]string{
+	// commitInstructions must always prohibit manual test/lint runs,
+	// even when no commands are configured.
+	ci := commitInstructions(false, nil)
+	if !strings.Contains(ci, "Do NOT run any individual test") {
+		t.Error("commitInstructions missing individual test prohibition when no commands configured")
+	}
+
+	ci = commitInstructions(false, map[string]string{
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
-	}
-
-	vs := verificationSection(cmds)
-	if !strings.Contains(vs, "Do NOT run any individual test") {
-		t.Error("verificationSection missing individual test prohibition")
-	}
-
-	ci := commitInstructions(false, cmds)
+	})
 	if !strings.Contains(ci, "Do NOT run any individual test") {
-		t.Error("commitInstructions missing individual test prohibition")
+		t.Error("commitInstructions missing individual test prohibition when commands configured")
 	}
 }
