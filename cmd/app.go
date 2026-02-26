@@ -39,8 +39,10 @@ func NewApp() *cli.App {
 		Description: "Hydra turns markdown design documents into branches, code, and commits. " +
 			"It assembles context from your design docs, hands it to Claude, runs tests and " +
 			"linting, and pushes a branch ready for your review.",
-		Before: func(_ *cli.Context) error {
-			promptCompletionInstall()
+		Before: func(c *cli.Context) error {
+			if c.Args().First() != "completion" {
+				promptCompletionInstall()
+			}
 			return nil
 		},
 		Commands: []*cli.Command{
