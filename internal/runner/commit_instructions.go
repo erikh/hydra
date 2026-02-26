@@ -15,7 +15,10 @@ func verificationSection(commands map[string]string) string {
 
 	var b strings.Builder
 	b.WriteString("\n## Verification\n\n")
-	b.WriteString("Before committing, ensure all checks pass:\n\n")
+	b.WriteString("Before committing, ensure all checks pass. " +
+		"The commands below are the project's official test and lint commands from hydra.yml. " +
+		"Do not run other commands to perform testing or linting. " +
+		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
 
 	if testCmd != "" {
 		b.WriteString("- Run tests: `")
@@ -28,7 +31,6 @@ func verificationSection(commands map[string]string) string {
 		b.WriteString("`\n")
 	}
 
-	b.WriteString("\nFix any issues before proceeding to commit.\n")
 	b.WriteString("\nIMPORTANT: Multiple hydra tasks may run concurrently, each in its own " +
 		"work directory. Do not modify these commands to use fixed ports, shared temp files, " +
 		"or any global state that would conflict with parallel runs. " +
@@ -41,7 +43,10 @@ func verificationSection(commands map[string]string) string {
 func commitInstructions(sign bool, commands map[string]string) string {
 	var b strings.Builder
 	b.WriteString("\n\n# Commit Instructions\n\n")
-	b.WriteString("After making all code changes, follow these steps:\n\n")
+	b.WriteString("After making all code changes, follow the steps below. " +
+		"The test and lint commands below are the project's official commands from hydra.yml. " +
+		"Do not run other commands to perform testing or linting. " +
+		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
 
 	if testCmd, ok := commands["test"]; ok && testCmd != "" {
 		b.WriteString("1. Run the test suite: `")

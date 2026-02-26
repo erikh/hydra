@@ -1255,6 +1255,126 @@ func TestCommitInstructionsUnsigned(t *testing.T) {
 	}
 }
 
+func TestCommitInstructionsExclusiveCommands(t *testing.T) {
+	result := commitInstructions(false, map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	})
+
+	if !strings.Contains(result, "Do not run other commands") {
+		t.Error("missing exclusive commands directive in commit instructions")
+	}
+	if !strings.Contains(result, "listed below") {
+		t.Error("directive should reference commands listed below")
+	}
+}
+
+func TestVerificationSectionExclusiveCommands(t *testing.T) {
+	result := verificationSection(map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	})
+
+	if !strings.Contains(result, "Do not run other commands") {
+		t.Error("missing exclusive commands directive in verification section")
+	}
+	if !strings.Contains(result, "listed below") {
+		t.Error("directive should reference commands listed below")
+	}
+}
+
+func TestPreMergeDocumentExclusiveCommands(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	}
+	result := assemblePreMergeDocument("Task content", cmds)
+
+	if !strings.Contains(result, "Do not run other commands") {
+		t.Error("missing exclusive commands directive in pre-merge document")
+	}
+	if !strings.Contains(result, "listed below") {
+		t.Error("directive should reference commands listed below")
+	}
+}
+
+func TestTestDocumentExclusiveCommands(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	}
+	result := assembleTestDocument("Task content", cmds)
+
+	if !strings.Contains(result, "Do not run other commands") {
+		t.Error("missing exclusive commands directive in test document")
+	}
+	if !strings.Contains(result, "listed below") {
+		t.Error("directive should reference commands listed below")
+	}
+}
+
+func TestTestFixDocumentExclusiveCommands(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	result := assembleTestFixDocument("Task content", "test failure output", cmds)
+
+	if !strings.Contains(result, "Do not run other commands") {
+		t.Error("missing exclusive commands directive in test fix document")
+	}
+	if !strings.Contains(result, "listed below") {
+		t.Error("directive should reference commands listed below")
+	}
+}
+
+func TestRunDocumentExclusiveCommands(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(captured, "Do not run other commands") {
+		t.Error("run document missing exclusive commands directive")
+	}
+}
+
+func TestReviewDocumentExclusiveCommands(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task first to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	if err := r.Review("add-feature"); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+
+	if !strings.Contains(captured, "Do not run other commands") {
+		t.Error("review document missing exclusive commands directive")
+	}
+}
+
 func TestCommitInstructionsSigned(t *testing.T) {
 	result := commitInstructions(true, nil)
 

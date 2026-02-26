@@ -130,14 +130,17 @@ func assembleTestDocument(taskContent string, cmds map[string]string) string {
 	b.WriteString("3. Add tests for any features or behaviors that lack coverage\n")
 	b.WriteString("4. Ensure tests cover both success and error paths\n\n")
 
+	b.WriteString("The commands below are the project's official test and lint commands from hydra.yml. " +
+		"Do not run other commands to perform testing or linting. " +
+		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
+
 	if testCmd, ok := cmds["test"]; ok {
-		b.WriteString(fmt.Sprintf("Run the test suite with: `%s`\n", testCmd))
-		b.WriteString("Fix any test failures.\n\n")
+		b.WriteString(fmt.Sprintf("- Run the test suite: `%s`\n", testCmd))
 	}
 	if lintCmd, ok := cmds["lint"]; ok {
-		b.WriteString(fmt.Sprintf("Run the linter with: `%s`\n", lintCmd))
-		b.WriteString("Fix any lint issues.\n\n")
+		b.WriteString(fmt.Sprintf("- Run the linter: `%s`\n", lintCmd))
 	}
+	b.WriteString("\n")
 
 	return b.String()
 }

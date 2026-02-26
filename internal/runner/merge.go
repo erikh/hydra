@@ -274,19 +274,18 @@ func assemblePreMergeDocument(taskContent string, cmds map[string]string) string
 	b.WriteString("Verify that every feature, behavior, or change described in the task document " +
 		"has corresponding test coverage. If any requirement lacks tests, add the missing tests.\n\n")
 
-	b.WriteString("### 3. Lint\n\n")
+	b.WriteString("### 3. Lint and Tests\n\n")
+	b.WriteString("The commands below are the project's official test and lint commands from hydra.yml. " +
+		"Do not run other commands to perform testing or linting. " +
+		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
 	if lintCmd, ok := cmds["lint"]; ok {
-		b.WriteString(fmt.Sprintf("Run the linter: `%s`\n", lintCmd))
-		b.WriteString("Fix any lint issues found.\n\n")
+		b.WriteString(fmt.Sprintf("- Run the linter: `%s`\n", lintCmd))
 	}
-
-	b.WriteString("### 4. Tests\n\n")
 	if testCmd, ok := cmds["test"]; ok {
-		b.WriteString(fmt.Sprintf("Run the test suite: `%s`\n", testCmd))
-		b.WriteString("Fix any test failures.\n\n")
+		b.WriteString(fmt.Sprintf("- Run the test suite: `%s`\n", testCmd))
 	}
 
-	b.WriteString("If everything passes and no changes are needed, do not create a commit.\n")
+	b.WriteString("\nIf everything passes and no changes are needed, do not create a commit.\n")
 
 	return b.String()
 }
@@ -389,6 +388,9 @@ func assembleTestFixDocument(taskContent string, testError string, cmds map[stri
 	doc += "## Task Context\n\n" + taskContent + "\n"
 
 	if testCmd, ok := cmds["test"]; ok {
+		doc += "\nThe command below is the project's official test command from hydra.yml. " +
+			"Do not run other commands to perform testing. " +
+			"Only run the exact command listed below, fix any issues it reports, and repeat until it passes.\n"
 		doc += fmt.Sprintf("\nRun tests with: `%s`\n", testCmd)
 	}
 
