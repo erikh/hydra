@@ -2,7 +2,7 @@
 
 Local pull request workflow where Claude is the only contributor.
 
-Hydra turns a tree of markdown design documents into branches, code, and commits — without you writing a line. It assembles context from your design docs, hands it to Claude, runs tests and linting, and pushes a branch ready for your review.
+Hydra turns a tree of markdown design documents into branches, code, and commits — without you writing a line. It assembles context from your design docs, calls the Anthropic API directly with an interactive TUI, runs tests and linting, and pushes a branch ready for your review.
 
 ## Installation
 
@@ -10,7 +10,12 @@ Hydra turns a tree of markdown design documents into branches, code, and commits
 go install github.com/erikh/hydra@latest
 ```
 
-Requires the [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) to be installed and configured.
+### Credentials
+
+Hydra calls the Anthropic API directly. Provide credentials in one of two ways:
+
+1. **Environment variable** (recommended): set `ANTHROPIC_API_KEY`
+2. **Claude CLI credentials**: Hydra reads `~/.claude/.credentials.json` (the OAuth token from the Claude CLI)
 
 ## Quick Start
 
@@ -21,11 +26,17 @@ hydra init https://github.com/you/project.git ./my-design
 # Create a new task
 hydra edit add-auth
 
-# Run the task
+# Run the task (opens interactive TUI)
 hydra run add-auth
+
+# Run with auto-accept (no approval prompts)
+hydra run -y add-auth
 
 # Run all tasks in a group
 hydra run-group backend
+
+# Import issues from GitHub/Gitea
+hydra sync
 
 # Check progress
 hydra status
@@ -53,22 +64,50 @@ Executes the full task lifecycle:
 2. Acquires a file lock (`.hydra/hydra.lock`) — only one task runs at a time
 3. Creates a git branch `hydra/<task-name>` (or `hydra/<group>/<task-name>`)
 4. Assembles a document from `rules.md`, `lint.md`, the task content, and `functional.md`
-5. Sends the document to `claude -p --dangerously-skip-permissions` in the repo directory
-6. Verifies Claude produced changes
-7. Runs the `test` command from `hydra.yml` (if configured)
-8. Runs the `lint` command from `hydra.yml` (if configured)
-9. Stages all changes, commits (message: `hydra: <task-name>`), and pushes
-10. Records the commit SHA in `state/record.json`
-11. Moves the task file to `state/review/`
-12. Releases the lock
+5. Opens an interactive TUI session with the Anthropic API
+6. Claude works through the task using tools (read, write, edit, bash, list, search)
+7. Tool calls that modify files or run commands require approval (unless `--auto-accept` / `-y` is set)
+8. Verifies Claude produced changes
+9. Runs the `test` command from `hydra.yml` (if configured)
+10. Runs the `lint` command from `hydra.yml` (if configured)
+11. Stages all changes, commits (message: `hydra: <task-name>`), and pushes
+12. Records the commit SHA in `state/record.json`
+13. Moves the task file to `state/review/`
+14. Releases the lock
 
 Commits are GPG-signed if `user.signingkey` is configured in git. Stale locks from dead processes are automatically recovered.
+
+**Flags:**
+
+- `--auto-accept` / `-y`: Auto-accept all tool calls without prompting
 
 ### `hydra run-group <group-name>`
 
 Executes all pending tasks in the named group sequentially, in alphabetical order by task name. Between tasks, the base branch is restored so each task starts from a clean state. Stops immediately on the first error.
 
 If a `group.md` file exists in the group directory (`tasks/{group}/group.md`), its content is included as a `# Group` section in every task's assembled document.
+
+**Flags:**
+
+- `--auto-accept` / `-y`: Auto-accept all tool calls without prompting
+
+### `hydra sync`
+
+Imports open issues from GitHub or Gitea as task files under `tasks/issues/`.
+
+- Issues are created as `tasks/issues/{number}-{slugified-title}.md`
+- A `group.md` is created automatically for the issues group
+- Existing issues (matched by number prefix) are skipped
+- The API type is auto-detected from the source repo URL (GitHub if the host is `github.com`, Gitea otherwise), or can be set explicitly via `api_type` in `hydra.yml`
+
+**Flags:**
+
+- `--label`: Filter issues by label (can be specified multiple times)
+
+**Authentication:**
+
+- **GitHub**: Set `GITHUB_TOKEN` for private repos or higher rate limits
+- **Gitea**: Set `GITEA_TOKEN` environment variable
 
 ### `hydra list`
 
@@ -82,6 +121,26 @@ Shows tasks grouped by state (pending, review, merge, completed, abandoned) and 
 
 Lists milestone targets from the `milestone/` directory and historical milestone scores from `milestone/history/`. History entries include a letter grade (A-F) parsed from the filename.
 
+## Interactive TUI
+
+When `hydra run` starts a Claude session, it opens a full-screen terminal UI:
+
+- **Streaming output**: Claude's responses stream in real-time
+- **Tool approval**: Write/edit/bash operations show a diff or command preview with Accept/Reject buttons
+- **Auto-accept mode**: Press `a` during a session to toggle auto-accept, or use `--auto-accept` / `-y`
+- **Pywal theme support**: Colors are loaded from `~/.cache/wal/colors.json` when available
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| Ctrl+C | Cancel and quit |
+| a | Toggle auto-accept mode |
+| Enter / y | Approve tool call |
+| Esc / n | Reject tool call |
+| Up / Down | Scroll viewport |
+| Left / Right | Navigate Accept/Reject buttons |
+
 ## Design Directory Structure
 
 ```
@@ -89,12 +148,15 @@ design-dir/
 ├── rules.md                          # Rules injected into every task context
 ├── lint.md                           # Code quality and linting rules
 ├── functional.md                     # Functional test requirements
-├── hydra.yml                         # Test and lint command configuration
+├── hydra.yml                         # Configuration (commands, model, API type)
 ├── tasks/                            # Pending task files
 │   ├── {name}.md                     # Individual task
-│   └── {group}/                      # Task group (subdirectory)
-│       ├── group.md                  # Optional group heading (shared context)
-│       └── {name}.md                 # Grouped task
+│   ├── {group}/                      # Task group (subdirectory)
+│   │   ├── group.md                  # Optional group heading (shared context)
+│   │   └── {name}.md                 # Grouped task
+│   └── issues/                       # Imported issues (created by hydra sync)
+│       ├── group.md                  # Auto-generated group heading
+│       └── {number}-{slug}.md        # Issue task files
 ├── other/                            # Miscellaneous files
 ├── state/
 │   ├── record.json                   # SHA-to-task mapping for all completed runs
@@ -112,9 +174,19 @@ design-dir/
 
 ## hydra.yml
 
-Configure test and lint commands that run after Claude makes changes:
+Configure commands, model, and issue sync settings:
 
 ```yaml
+# Model to use for Claude API calls (default: claude-sonnet-4-6)
+model: claude-sonnet-4-6
+
+# Issue sync API type: "github" or "gitea" (auto-detected from URL if omitted)
+api_type: github
+
+# Gitea instance URL (only needed if api_type is "gitea" and URL can't be parsed)
+gitea_url: https://gitea.example.com
+
+# Commands to run after Claude makes changes
 commands:
   test: "go test ./... -count=1"
   lint: "golangci-lint run ./..."

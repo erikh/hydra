@@ -2,6 +2,7 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,9 +16,16 @@ import (
 	"github.com/erikh/hydra/internal/taskrun"
 )
 
+// ClaudeRunConfig holds the parameters for a Claude invocation.
+type ClaudeRunConfig struct {
+	RepoDir    string
+	Document   string
+	Model      string
+	AutoAccept bool
+}
+
 // ClaudeFunc is the function signature for invoking claude.
-// It receives the repo working directory and the assembled document.
-type ClaudeFunc func(repoDir, document string) error
+type ClaudeFunc func(ctx context.Context, cfg ClaudeRunConfig) error
 
 // Runner orchestrates the full hydra run workflow.
 type Runner struct {
@@ -27,6 +35,8 @@ type Runner struct {
 	Claude     ClaudeFunc
 	TaskRunner *taskrun.Commands // loaded from hydra.yml; nil if not present
 	BaseDir    string            // working directory for lock file; defaults to "."
+	Model      string            // model name override
+	AutoAccept bool              // auto-accept all tool calls
 }
 
 // New creates a Runner from the given config.
@@ -52,6 +62,9 @@ func New(cfg *config.Config) (*Runner, error) {
 			return nil, fmt.Errorf("loading hydra.yml: %w", err)
 		}
 		r.TaskRunner = cmds
+		if cmds.Model != "" {
+			r.Model = cmds.Model
+		}
 	}
 
 	return r, nil
@@ -105,7 +118,13 @@ func (r *Runner) Run(taskName string) error {
 	if claudeFn == nil {
 		claudeFn = invokeClaude
 	}
-	if err := claudeFn(r.Config.RepoDir, doc); err != nil {
+	runCfg := ClaudeRunConfig{
+		RepoDir:    r.Config.RepoDir,
+		Document:   doc,
+		Model:      r.Model,
+		AutoAccept: r.AutoAccept,
+	}
+	if err := claudeFn(context.Background(), runCfg); err != nil {
 		return err
 	}
 

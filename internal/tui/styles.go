@@ -1,0 +1,142 @@
+// Package tui provides the Bubbletea TUI for interactive Claude sessions.
+package tui
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// Theme holds the color scheme for the TUI.
+type Theme struct {
+	Bg        lipgloss.Color
+	Fg        lipgloss.Color
+	Accent    lipgloss.Color
+	Success   lipgloss.Color
+	Error     lipgloss.Color
+	Warning   lipgloss.Color
+	Muted     lipgloss.Color
+	Highlight lipgloss.Color
+}
+
+// DefaultTheme returns the hardcoded fallback theme.
+func DefaultTheme() Theme {
+	return Theme{
+		Bg:        lipgloss.Color("#1a1b26"),
+		Fg:        lipgloss.Color("#c0caf5"),
+		Accent:    lipgloss.Color("#7aa2f7"),
+		Success:   lipgloss.Color("#9ece6a"),
+		Error:     lipgloss.Color("#f7768e"),
+		Warning:   lipgloss.Color("#e0af68"),
+		Muted:     lipgloss.Color("#565f89"),
+		Highlight: lipgloss.Color("#bb9af7"),
+	}
+}
+
+// pywalColors is the JSON structure of ~/.cache/wal/colors.json.
+type pywalColors struct {
+	Special struct {
+		Background string `json:"background"`
+		Foreground string `json:"foreground"`
+	} `json:"special"`
+	Colors map[string]string `json:"colors"`
+}
+
+// LoadTheme loads colors from pywal if available, otherwise returns the default.
+func LoadTheme() Theme {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return DefaultTheme()
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".cache", "wal", "colors.json")) //nolint:gosec // well-known pywal path
+	if err != nil {
+		return DefaultTheme()
+	}
+
+	var wal pywalColors
+	if err := json.Unmarshal(data, &wal); err != nil {
+		return DefaultTheme()
+	}
+
+	get := func(key, fallback string) lipgloss.Color {
+		if v, ok := wal.Colors[key]; ok && v != "" {
+			return lipgloss.Color(v)
+		}
+		return lipgloss.Color(fallback)
+	}
+
+	bg := lipgloss.Color(wal.Special.Background)
+	if wal.Special.Background == "" {
+		bg = DefaultTheme().Bg
+	}
+	fg := lipgloss.Color(wal.Special.Foreground)
+	if wal.Special.Foreground == "" {
+		fg = DefaultTheme().Fg
+	}
+
+	return Theme{
+		Bg:        bg,
+		Fg:        fg,
+		Accent:    get("color4", "#7aa2f7"),
+		Success:   get("color2", "#9ece6a"),
+		Error:     get("color1", "#f7768e"),
+		Warning:   get("color3", "#e0af68"),
+		Muted:     get("color8", "#565f89"),
+		Highlight: get("color5", "#bb9af7"),
+	}
+}
+
+// Derived styles.
+
+// TextStyle returns the base text style.
+func (t Theme) TextStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Fg)
+}
+
+// AccentStyle returns a style for accented text.
+func (t Theme) AccentStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+}
+
+// ErrorStyle returns a style for error text.
+func (t Theme) ErrorStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Error).Bold(true)
+}
+
+// SuccessStyle returns a style for success text.
+func (t Theme) SuccessStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Success)
+}
+
+// WarningStyle returns a style for warning text.
+func (t Theme) WarningStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Warning)
+}
+
+// MutedStyle returns a style for muted/secondary text.
+func (t Theme) MutedStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Muted)
+}
+
+// HighlightStyle returns a style for highlighted text.
+func (t Theme) HighlightStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Highlight)
+}
+
+// DiffAddStyle returns a style for added diff lines.
+func (t Theme) DiffAddStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Success)
+}
+
+// DiffRemoveStyle returns a style for removed diff lines.
+func (t Theme) DiffRemoveStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Error)
+}
+
+// DiffHeaderStyle returns a style for diff headers.
+func (t Theme) DiffHeaderStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+}

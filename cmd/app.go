@@ -2,16 +2,20 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
+	"github.com/erikh/hydra/internal/issues"
 	"github.com/erikh/hydra/internal/lock"
 	"github.com/erikh/hydra/internal/repo"
 	"github.com/erikh/hydra/internal/runner"
+	"github.com/erikh/hydra/internal/taskrun"
 	"github.com/urfave/cli/v2"
 )
 
@@ -31,6 +35,7 @@ func NewApp() *cli.App {
 			statusCommand(),
 			listCommand(),
 			milestoneCommand(),
+			syncCommand(),
 		},
 	}
 }
@@ -134,8 +139,16 @@ func runCommand() *cli.Command {
 		Usage:     "Execute a design task",
 		ArgsUsage: "<task-name>",
 		Description: "Executes the full task lifecycle: acquires a lock, creates a git branch, " +
-			"assembles the design document, invokes Claude, runs tests and linter, commits, " +
-			"pushes, records the commit SHA, and moves the task to review.",
+			"assembles the design document, invokes Claude via the Anthropic API with an " +
+			"interactive TUI, runs tests and linter, commits, pushes, records the commit SHA, " +
+			"and moves the task to review.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "auto-accept",
+				Aliases: []string{"y"},
+				Usage:   "Auto-accept all tool calls without prompting",
+			},
+		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 1 {
 				return errors.New("usage: hydra run <task-name>")
@@ -151,6 +164,10 @@ func runCommand() *cli.Command {
 				return err
 			}
 
+			if c.Bool("auto-accept") {
+				r.AutoAccept = true
+			}
+
 			return r.Run(c.Args().Get(0))
 		},
 	}
@@ -164,6 +181,13 @@ func runGroupCommand() *cli.Command {
 		Description: "Runs all pending tasks in the named group in alphabetical order. " +
 			"Between tasks, the base branch is restored so each task starts from a clean state. " +
 			"Stops immediately on the first error.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "auto-accept",
+				Aliases: []string{"y"},
+				Usage:   "Auto-accept all tool calls without prompting",
+			},
+		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 1 {
 				return errors.New("usage: hydra run-group <group-name>")
@@ -177,6 +201,10 @@ func runGroupCommand() *cli.Command {
 			r, err := runner.New(cfg)
 			if err != nil {
 				return err
+			}
+
+			if c.Bool("auto-accept") {
+				r.AutoAccept = true
 			}
 
 			return r.RunGroup(c.Args().Get(0))
@@ -277,6 +305,108 @@ func listCommand() *cli.Command {
 			return nil
 		},
 	}
+}
+
+func syncCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "sync",
+		Usage: "Import open issues from GitHub or Gitea as design tasks",
+		Description: "Fetches open issues from the source repository's issue tracker and " +
+			"creates task files under tasks/issues/. Existing issues (matched by number) " +
+			"are skipped. Supports both GitHub and Gitea; the API type is auto-detected " +
+			"from the remote URL or can be set via api_type in hydra.yml.",
+		Flags: []cli.Flag{
+			&cli.StringSliceFlag{
+				Name:  "label",
+				Usage: "Filter issues by label (can be specified multiple times)",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			cfg, err := config.Discover()
+			if err != nil {
+				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
+			}
+
+			labels := c.StringSlice("label")
+
+			// Load hydra.yml for api_type/gitea_url overrides.
+			var cmds *taskrun.Commands
+			ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
+			if _, err := os.Stat(ymlPath); err == nil {
+				cmds, err = taskrun.Load(ymlPath)
+				if err != nil {
+					return fmt.Errorf("loading hydra.yml: %w", err)
+				}
+			}
+
+			// Determine the source.
+			source, err := resolveIssueSource(cfg.SourceRepoURL, cmds)
+			if err != nil {
+				return err
+			}
+
+			created, skipped, err := issues.Sync(context.Background(), cfg.DesignDir, source, labels)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Synced issues: %d created, %d skipped\n", created, skipped)
+			return nil
+		},
+	}
+}
+
+func resolveIssueSource(repoURL string, cmds *taskrun.Commands) (issues.Source, error) {
+	apiType := ""
+	giteaURL := ""
+	giteaToken := ""
+	if cmds != nil {
+		apiType = cmds.APIType
+		giteaURL = cmds.GiteaURL
+	}
+
+	// Explicit api_type override.
+	if apiType == "github" {
+		owner, repo, ok := issues.ParseGitHubURL(repoURL)
+		if !ok {
+			return nil, fmt.Errorf("cannot parse GitHub owner/repo from %q", repoURL)
+		}
+		return issues.NewGitHubSource(owner, repo), nil
+	}
+	if apiType == "gitea" {
+		baseURL := giteaURL
+		if baseURL == "" {
+			var owner, repo string
+			var ok bool
+			baseURL, owner, repo, ok = issues.ParseGiteaURL(repoURL)
+			if !ok {
+				return nil, fmt.Errorf("cannot parse Gitea URL from %q", repoURL)
+			}
+			return issues.NewGiteaSource(baseURL, owner, repo, giteaToken), nil
+		}
+		// Parse owner/repo from URL even when base URL is overridden.
+		_, owner, repo, ok := issues.ParseGiteaURL(repoURL)
+		if !ok {
+			return nil, fmt.Errorf("cannot parse owner/repo from %q", repoURL)
+		}
+		return issues.NewGiteaSource(baseURL, owner, repo, giteaToken), nil
+	}
+
+	// Auto-detect: if URL contains github.com, use GitHub.
+	if strings.Contains(repoURL, "github.com") {
+		owner, repo, ok := issues.ParseGitHubURL(repoURL)
+		if !ok {
+			return nil, fmt.Errorf("cannot parse GitHub owner/repo from %q", repoURL)
+		}
+		return issues.NewGitHubSource(owner, repo), nil
+	}
+
+	// Default to Gitea for non-GitHub hosts.
+	baseURL, owner, repo, ok := issues.ParseGiteaURL(repoURL)
+	if !ok {
+		return nil, fmt.Errorf("cannot determine issue source from %q; set api_type in hydra.yml", repoURL)
+	}
+	return issues.NewGiteaSource(baseURL, owner, repo, giteaToken), nil
 }
 
 func milestoneCommand() *cli.Command {

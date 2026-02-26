@@ -125,25 +125,25 @@ func mkdirAll(t *testing.T, path string) {
 }
 
 // mockClaude simulates claude by creating a file in the repo.
-func mockClaude(repoDir, _ string) error {
-	return os.WriteFile(filepath.Join(repoDir, "generated.go"), []byte("package main\n"), 0o600)
+func mockClaude(_ context.Context, cfg ClaudeRunConfig) error {
+	return os.WriteFile(filepath.Join(cfg.RepoDir, "generated.go"), []byte("package main\n"), 0o600)
 }
 
 // mockClaudeNoChanges simulates claude doing nothing.
-func mockClaudeNoChanges(_, _ string) error {
+func mockClaudeNoChanges(_ context.Context, _ ClaudeRunConfig) error {
 	return nil
 }
 
 // mockClaudeFailing simulates claude returning an error.
-func mockClaudeFailing(_, _ string) error {
+func mockClaudeFailing(_ context.Context, _ ClaudeRunConfig) error {
 	return errors.New("claude crashed")
 }
 
 // mockClaudeCapture captures the document that was passed to claude.
 func mockClaudeCapture(captured *string) ClaudeFunc {
-	return func(repoDir, document string) error {
-		*captured = document
-		return os.WriteFile(filepath.Join(repoDir, "output.txt"), []byte("done"), 0o600)
+	return func(_ context.Context, cfg ClaudeRunConfig) error {
+		*captured = cfg.Document
+		return os.WriteFile(filepath.Join(cfg.RepoDir, "output.txt"), []byte("done"), 0o600)
 	}
 }
 
@@ -596,10 +596,10 @@ func TestRunGroupFullWorkflow(t *testing.T) {
 
 	// Use a unique file per invocation to avoid "no changes" error.
 	callCount := 0
-	r.Claude = func(repoDir, _ string) error {
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
 		callCount++
 		fname := fmt.Sprintf("generated-%d.go", callCount)
-		return os.WriteFile(filepath.Join(repoDir, fname), []byte("package main\n"), 0o600)
+		return os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600)
 	}
 	r.BaseDir = env.BaseDir
 
@@ -638,11 +638,11 @@ func TestRunGroupStopsOnError(t *testing.T) {
 
 	// First call succeeds, second fails.
 	callCount := 0
-	r.Claude = func(repoDir, _ string) error {
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
 		callCount++
 		if callCount == 1 {
 			fname := fmt.Sprintf("generated-%d.go", callCount)
-			return os.WriteFile(filepath.Join(repoDir, fname), []byte("package main\n"), 0o600)
+			return os.WriteFile(filepath.Join(cfg.RepoDir, fname), []byte("package main\n"), 0o600)
 		}
 		return errors.New("claude crashed")
 	}

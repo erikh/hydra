@@ -13,6 +13,9 @@ import (
 
 // Commands holds the named commands loaded from hydra.yml.
 type Commands struct {
+	Model    string            `yaml:"model"`
+	APIType  string            `yaml:"api_type"`
+	GiteaURL string            `yaml:"gitea_url"`
 	Commands map[string]string `yaml:"commands"`
 }
 
