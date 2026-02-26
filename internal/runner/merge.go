@@ -154,7 +154,8 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 
 	b.WriteString("# Merge Workflow\n\n")
 	b.WriteString("This branch is being merged into the default branch. " +
-		"Complete all steps below in order.\n\n")
+		"Complete all steps below in order. " +
+		"Do not make changes beyond what is required for the merge — resolve conflicts, validate commits and tests, and commit. Nothing else.\n\n")
 
 	b.WriteString("## Task Document\n\n")
 	b.WriteString(taskContent)
@@ -191,6 +192,7 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 
 	b.WriteString(verificationSection(cmds))
 	b.WriteString(commitInstructions(sign, cmds))
+	b.WriteString(missionReminder())
 
 	return b.String()
 }

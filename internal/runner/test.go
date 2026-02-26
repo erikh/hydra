@@ -65,6 +65,7 @@ func (r *Runner) Test(taskName string) error {
 	sign := taskRepo.HasSigningKey()
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+	doc += missionReminder()
 
 	// Run before hook.
 	if err := r.runBeforeHook(wd); err != nil {
@@ -120,6 +121,10 @@ func (r *Runner) Test(taskName string) error {
 // assembleTestDocument builds a document for the test session.
 func assembleTestDocument(taskContent string) string {
 	var b strings.Builder
+
+	b.WriteString("# Mission\n\nYour sole objective is to add tests for the task described below. ")
+	b.WriteString("Focus exclusively on identifying untested features from the task document and adding coverage. ")
+	b.WriteString("Do not refactor existing code, add unrelated tests, or make changes outside the scope of this task.\n\n")
 
 	b.WriteString("# Task Description\n\n")
 	b.WriteString(taskContent)

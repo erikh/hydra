@@ -101,6 +101,7 @@ func Scaffold(path string) error {
 		filepath.Join("state", "completed"),
 		filepath.Join("state", "abandoned"),
 		filepath.Join("milestone", "history"),
+		filepath.Join("milestone", "delivered"),
 	}
 
 	for _, d := range dirs {
@@ -136,6 +137,13 @@ func (d *Dir) GroupContent(group string) (string, error) {
 	return d.readFile(filepath.Join("tasks", group, "group.md"))
 }
 
+// MissionPreamble is prepended to every assembled document to keep Claude focused on the task.
+const MissionPreamble = `# Mission
+
+Your sole objective is to implement the task described in the "Task" section below. Every action you take — reading files, writing code, running commands — must directly serve that task. Do not make changes unrelated to the task, do not refactor surrounding code, do not "improve" things you notice along the way. If the task says to add a feature, add exactly that feature. If it says to fix a bug, fix exactly that bug. Stay focused.
+
+`
+
 // AssembleDocument builds a single markdown document from rules, lint, group heading, task content, and functional specs.
 // The groupContent parameter is included as a "# Group" section between lint and task if non-empty.
 func (d *Dir) AssembleDocument(taskContent, groupContent string) (string, error) {
@@ -154,7 +162,7 @@ func (d *Dir) AssembleDocument(taskContent, groupContent string) (string, error)
 		return "", err
 	}
 
-	doc := ""
+	doc := MissionPreamble
 	if rules != "" {
 		doc += "# Rules\n\n" + rules + "\n\n"
 	}

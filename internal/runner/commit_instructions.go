@@ -89,6 +89,14 @@ func commitInstructions(sign bool, commands map[string]string) string {
 	return b.String()
 }
 
+// missionReminder returns a closing section that reinforces task focus.
+func missionReminder() string {
+	return "\n\n# Reminder\n\n" +
+		"Your ONLY job is the task described in the document above. " +
+		"Do not make unrelated changes, refactor other code, or work on anything " +
+		"outside the scope of the task. Stay focused on the mission.\n"
+}
+
 // stepPrefix returns a numbered step prefix like "1. ", "2. ", etc.
 func stepPrefix(n int) string {
 	return fmt.Sprintf("%d. ", n)

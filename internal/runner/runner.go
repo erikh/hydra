@@ -224,6 +224,7 @@ func (r *Runner) Run(taskName string) error {
 	cmds := r.commandsMap(wd)
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+	doc += missionReminder()
 
 	// Run before hook.
 	if err := r.runBeforeHook(wd); err != nil {

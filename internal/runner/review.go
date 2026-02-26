@@ -102,6 +102,7 @@ func (r *Runner) Review(taskName string) error {
 	cmds := r.commandsMap(wd)
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+	doc += missionReminder()
 
 	// Run before hook.
 	if err := r.runBeforeHook(wd); err != nil {
@@ -167,7 +168,9 @@ func (r *Runner) assembleReviewDocument(taskContent string) (string, error) {
 		return "", err
 	}
 
-	doc := ""
+	doc := "# Mission\n\nYour sole objective is to review the implementation of the task described below. " +
+		"Focus exclusively on verifying correctness, test coverage, and commit messages for this specific task. " +
+		"Do not make unrelated improvements or refactor code outside the task's scope.\n\n"
 	if rules != "" {
 		doc += "# Rules\n\n" + rules + "\n\n"
 	}

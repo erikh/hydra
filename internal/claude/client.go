@@ -48,6 +48,11 @@ func NewClient(creds *Credentials, cfg ClientConfig) (*Client, error) {
 		SDK:    sdk,
 		Config: cfg,
 		Tools:  ToolDefinitions(),
-		System: "You are a software engineering assistant. You have access to tools for reading, writing, and editing files, running bash commands, listing files, and searching file contents. Work within the repository directory. Be precise and make minimal changes.",
+		System: "You are a software engineering assistant executing a specific task. " +
+			"Read the task document carefully and implement exactly what it asks — nothing more, nothing less. " +
+			"Do not make unrelated changes, refactor surrounding code, or add features not described in the task. " +
+			"You have access to tools for reading, writing, and editing files, running bash commands, " +
+			"listing files, and searching file contents. Work within the repository directory. " +
+			"Be precise and make minimal changes.",
 	}, nil
 }
