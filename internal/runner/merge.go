@@ -75,8 +75,8 @@ func (r *Runner) Merge(taskName string) error {
 		return err
 	}
 
-	// Record SHA, complete task, close issue.
-	return r.finalizeMerge(task, taskRepo, taskName, defaultBranch)
+	// Record SHA, complete task, close issue, clean up remote branch.
+	return r.finalizeMerge(task, taskRepo, taskName, branch, defaultBranch)
 }
 
 // findMergeTask locates a task in review or merge state.
@@ -316,8 +316,9 @@ func (r *Runner) rebaseAndPush(taskRepo *repo.Repo, branch string) (string, erro
 	return defaultBranch, nil
 }
 
-// finalizeMerge records the SHA, moves the task to completed, and closes the issue.
-func (r *Runner) finalizeMerge(task *design.Task, taskRepo *repo.Repo, taskName, defaultBranch string) error {
+// finalizeMerge records the SHA, moves the task to completed, closes the issue,
+// and deletes the remote feature branch.
+func (r *Runner) finalizeMerge(task *design.Task, taskRepo *repo.Repo, taskName, branch, defaultBranch string) error {
 	sha, err := taskRepo.LastCommitSHA()
 	if err != nil {
 		return fmt.Errorf("getting commit SHA: %w", err)
@@ -332,6 +333,10 @@ func (r *Runner) finalizeMerge(task *design.Task, taskRepo *repo.Repo, taskName,
 	}
 
 	r.closeIssueIfNeeded(task, sha)
+
+	if err := taskRepo.DeleteRemoteBranch(branch); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not delete remote branch %q: %v\n", branch, err)
+	}
 
 	fmt.Printf("Task %q merged to %s and pushed. SHA: %s\n", taskName, defaultBranch, sha[:12])
 	return nil

@@ -123,6 +123,12 @@ func (r *Repo) DeleteBranch(name string) error {
 	return err
 }
 
+// DeleteRemoteBranch deletes a branch from the origin remote.
+func (r *Repo) DeleteRemoteBranch(name string) error {
+	_, err := r.run("push", "origin", "--delete", name)
+	return err
+}
+
 // IsGitRepo returns true if dir contains a .git directory or file.
 func IsGitRepo(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".git"))

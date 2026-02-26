@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v4"
@@ -101,6 +102,41 @@ func TestStatusOutputJSON(t *testing.T) {
 	}
 	if decoded.Pending != nil {
 		t.Errorf("pending = %v, want nil (omitted)", decoded.Pending)
+	}
+}
+
+func TestStatusOutputYAMLQuotesDigitValues(t *testing.T) {
+	out := statusOutput{
+		Pending: []string{"normal-task", "123-task", "42test"},
+	}
+
+	var buf bytes.Buffer
+	if err := yaml.NewEncoder(&buf).Encode(out); err != nil {
+		t.Fatalf("yaml encode: %v", err)
+	}
+
+	yamlStr := buf.String()
+
+	// Values starting with digits should be quoted.
+	if !strings.Contains(yamlStr, `"123-task"`) {
+		t.Errorf("expected 123-task to be quoted, got:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, `"42test"`) {
+		t.Errorf("expected 42test to be quoted, got:\n%s", yamlStr)
+	}
+
+	// Non-digit values should not be quoted.
+	if strings.Contains(yamlStr, `"normal-task"`) {
+		t.Errorf("expected normal-task to NOT be quoted, got:\n%s", yamlStr)
+	}
+
+	// Round-trip should still decode correctly.
+	var decoded statusOutput
+	if err := yaml.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("yaml decode: %v", err)
+	}
+	if len(decoded.Pending) != 3 || decoded.Pending[1] != "123-task" {
+		t.Errorf("pending = %v, want [normal-task 123-task 42test]", decoded.Pending)
 	}
 }
 

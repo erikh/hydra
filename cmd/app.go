@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
@@ -400,6 +401,32 @@ type statusOutput struct {
 	Merge     []string                 `json:"merge,omitempty" yaml:"merge,omitempty"`
 	Completed []string                 `json:"completed,omitempty" yaml:"completed,omitempty"`
 	Abandoned []string                 `json:"abandoned,omitempty" yaml:"abandoned,omitempty"`
+}
+
+// MarshalYAML quotes string values that start with a digit so the chroma YAML
+// lexer tokenizes them as strings rather than splitting them into number + text.
+func (s statusOutput) MarshalYAML() (any, error) {
+	type raw statusOutput
+	var n yaml.Node
+	if err := n.Encode(raw(s)); err != nil {
+		return nil, err
+	}
+	quoteDigitScalars(&n)
+	return &n, nil
+}
+
+// quoteDigitScalars walks a yaml.Node tree and applies double-quote style
+// to string scalars whose value starts with a digit.
+func quoteDigitScalars(n *yaml.Node) {
+	if n.Kind == yaml.ScalarNode && n.Tag == "!!str" {
+		runes := []rune(n.Value)
+		if len(runes) > 0 && unicode.IsDigit(runes[0]) {
+			n.Style = yaml.DoubleQuotedStyle
+		}
+	}
+	for _, child := range n.Content {
+		quoteDigitScalars(child)
+	}
 }
 
 func statusCommand() *cli.Command {

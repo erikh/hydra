@@ -151,6 +151,123 @@ func TestLoadThemePywalPartialColors(t *testing.T) {
 	}
 }
 
+func TestLoadThemeFromGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	hydraYml := `colors:
+  bg: "#2e3440"
+  fg: "#d8dee9"
+  accent: "#88c0d0"
+  success: "#a3be8c"
+  error: "#bf616a"
+  warning: "#ebcb8b"
+  muted: "#4c566a"
+  highlight: "#b48ead"
+`
+	if err := os.WriteFile(filepath.Join(home, ".hydra.yml"), []byte(hydraYml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	theme := LoadTheme()
+
+	want := map[string]string{
+		"Bg":        "#2e3440",
+		"Fg":        "#d8dee9",
+		"Accent":    "#88c0d0",
+		"Success":   "#a3be8c",
+		"Error":     "#bf616a",
+		"Warning":   "#ebcb8b",
+		"Muted":     "#4c566a",
+		"Highlight": "#b48ead",
+	}
+	got := map[string]string{
+		"Bg":        string(theme.Bg),
+		"Fg":        string(theme.Fg),
+		"Accent":    string(theme.Accent),
+		"Success":   string(theme.Success),
+		"Error":     string(theme.Error),
+		"Warning":   string(theme.Warning),
+		"Muted":     string(theme.Muted),
+		"Highlight": string(theme.Highlight),
+	}
+	for field, w := range want {
+		if got[field] != w {
+			t.Errorf("%s = %q, want %q", field, got[field], w)
+		}
+	}
+}
+
+func TestLoadThemeGlobalConfigPartialOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Only override accent and error; rest should come from default.
+	hydraYml := `colors:
+  accent: "#ff5555"
+  error: "#55ff55"
+`
+	if err := os.WriteFile(filepath.Join(home, ".hydra.yml"), []byte(hydraYml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	theme := LoadTheme()
+	def := DefaultTheme()
+
+	if string(theme.Accent) != "#ff5555" {
+		t.Errorf("Accent = %q, want #ff5555", theme.Accent)
+	}
+	if string(theme.Error) != "#55ff55" {
+		t.Errorf("Error = %q, want #55ff55", theme.Error)
+	}
+	if theme.Bg != def.Bg {
+		t.Errorf("Bg = %q, want default %q", theme.Bg, def.Bg)
+	}
+	if theme.Fg != def.Fg {
+		t.Errorf("Fg = %q, want default %q", theme.Fg, def.Fg)
+	}
+	if theme.Success != def.Success {
+		t.Errorf("Success = %q, want default %q", theme.Success, def.Success)
+	}
+}
+
+func TestLoadThemeGlobalConfigOverridesPywal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Set up pywal with specific colors.
+	walDir := filepath.Join(home, ".cache", "wal")
+	if err := os.MkdirAll(walDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	walColors := `{
+		"special": {"background": "#111111", "foreground": "#eeeeee"},
+		"colors": {"color4": "#0000ff"}
+	}`
+	if err := os.WriteFile(filepath.Join(walDir, "colors.json"), []byte(walColors), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Global config overrides accent (which pywal also sets via color4).
+	hydraYml := `colors:
+  accent: "#aabbcc"
+`
+	if err := os.WriteFile(filepath.Join(home, ".hydra.yml"), []byte(hydraYml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	theme := LoadTheme()
+
+	// Global config wins over pywal.
+	if string(theme.Accent) != "#aabbcc" {
+		t.Errorf("Accent = %q, want #aabbcc (global config should override pywal)", theme.Accent)
+	}
+	// Pywal values still used for non-overridden fields.
+	if string(theme.Bg) != "#111111" {
+		t.Errorf("Bg = %q, want #111111 (from pywal)", theme.Bg)
+	}
+}
+
 func TestThemeStyles(t *testing.T) {
 	theme := DefaultTheme()
 

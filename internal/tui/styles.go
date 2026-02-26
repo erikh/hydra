@@ -8,6 +8,7 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/lipgloss"
+	"go.yaml.in/yaml/v4"
 )
 
 // Theme holds the color scheme for the TUI.
@@ -36,6 +37,23 @@ func DefaultTheme() Theme {
 	}
 }
 
+// globalColors holds optional color overrides from ~/.hydra.yml.
+type globalColors struct {
+	Bg        string `yaml:"bg"`
+	Fg        string `yaml:"fg"`
+	Accent    string `yaml:"accent"`
+	Success   string `yaml:"success"`
+	Error     string `yaml:"error"`
+	Warning   string `yaml:"warning"`
+	Muted     string `yaml:"muted"`
+	Highlight string `yaml:"highlight"`
+}
+
+// globalConfig is the top-level structure of ~/.hydra.yml.
+type globalConfig struct {
+	Colors globalColors `yaml:"colors"`
+}
+
 // pywalColors is the JSON structure of ~/.cache/wal/colors.json.
 type pywalColors struct {
 	Special struct {
@@ -45,8 +63,18 @@ type pywalColors struct {
 	Colors map[string]string `json:"colors"`
 }
 
-// LoadTheme loads colors from pywal if available, otherwise returns the default.
+// LoadTheme loads colors with the following priority (highest to lowest):
+//  1. ~/.hydra.yml colors (explicit user override)
+//  2. pywal ~/.cache/wal/colors.json
+//  3. DefaultTheme() hardcoded values
 func LoadTheme() Theme {
+	theme := loadPywalTheme()
+	applyGlobalConfig(&theme)
+	return theme
+}
+
+// loadPywalTheme loads colors from pywal if available, otherwise returns the default.
+func loadPywalTheme() Theme {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return DefaultTheme()
@@ -87,6 +115,50 @@ func LoadTheme() Theme {
 		Warning:   get("color3", "#e0af68"),
 		Muted:     get("color8", "#565f89"),
 		Highlight: get("color5", "#bb9af7"),
+	}
+}
+
+// applyGlobalConfig loads ~/.hydra.yml and overrides any color fields that are set.
+func applyGlobalConfig(theme *Theme) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".hydra.yml")) //nolint:gosec // well-known user config path
+	if err != nil {
+		return
+	}
+
+	var cfg globalConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return
+	}
+
+	c := cfg.Colors
+	if c.Bg != "" {
+		theme.Bg = lipgloss.Color(c.Bg)
+	}
+	if c.Fg != "" {
+		theme.Fg = lipgloss.Color(c.Fg)
+	}
+	if c.Accent != "" {
+		theme.Accent = lipgloss.Color(c.Accent)
+	}
+	if c.Success != "" {
+		theme.Success = lipgloss.Color(c.Success)
+	}
+	if c.Error != "" {
+		theme.Error = lipgloss.Color(c.Error)
+	}
+	if c.Warning != "" {
+		theme.Warning = lipgloss.Color(c.Warning)
+	}
+	if c.Muted != "" {
+		theme.Muted = lipgloss.Color(c.Muted)
+	}
+	if c.Highlight != "" {
+		theme.Highlight = lipgloss.Color(c.Highlight)
 	}
 }
 
