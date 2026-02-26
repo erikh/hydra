@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
@@ -26,6 +27,7 @@ func NewApp() *cli.App {
 		Commands: []*cli.Command{
 			initCommand(),
 			runCommand(),
+			editCommand(),
 			statusCommand(),
 			listCommand(),
 			milestoneCommand(),
@@ -79,10 +81,49 @@ func initCommand() *cli.Command {
 				return err
 			}
 
+			// Create a convenience symlink at ./design pointing to the design dir.
+			symlink := filepath.Join(".", "design")
+			if _, err := os.Lstat(symlink); os.IsNotExist(err) {
+				if err := os.Symlink(cfg.DesignDir, symlink); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not create design symlink: %v\n", err)
+				}
+			}
+
 			fmt.Println("Initialized hydra project.")
 			fmt.Printf("  Source repo: %s\n", cfg.RepoDir)
 			fmt.Printf("  Design dir:  %s\n", cfg.DesignDir)
 			return nil
+		},
+	}
+}
+
+func editCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "edit",
+		Usage:     "Create a new task in the design directory",
+		ArgsUsage: "<task-name>",
+		Description: "Opens your editor to create a new task file. The editor is resolved " +
+			"from $VISUAL, then $EDITOR. The task name must not contain '/'.",
+		Action: func(c *cli.Context) error {
+			if c.NArg() != 1 {
+				return errors.New("usage: hydra edit <task-name>")
+			}
+
+			cfg, err := config.Load(".")
+			if err != nil {
+				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
+			}
+
+			editor := os.Getenv("VISUAL")
+			if editor == "" {
+				editor = os.Getenv("EDITOR")
+			}
+			if editor == "" {
+				return errors.New("no editor configured: set $VISUAL or $EDITOR")
+			}
+
+			taskName := c.Args().Get(0)
+			return design.EditNewTask(cfg.DesignDir, taskName, editor, os.Stdin, os.Stdout, os.Stderr)
 		},
 	}
 }

@@ -45,10 +45,15 @@ func Init(base, sourceRepoURL, designDir string) (*Config, error) {
 		return nil, fmt.Errorf("resolving design dir path: %w", err)
 	}
 
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return nil, fmt.Errorf("resolving base path: %w", err)
+	}
+
 	cfg := &Config{
 		SourceRepoURL: sourceRepoURL,
 		DesignDir:     absDesign,
-		RepoDir:       filepath.Join(hydraPath, "repo"),
+		RepoDir:       filepath.Join(absBase, "repo"),
 	}
 
 	if err := cfg.Save(base); err != nil {

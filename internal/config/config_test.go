@@ -41,7 +41,7 @@ func TestInitCreatesDirectoryAndConfig(t *testing.T) {
 		t.Errorf("DesignDir = %q, want %q", cfg.DesignDir, absDesign)
 	}
 
-	expectedRepoDir := filepath.Join(base, HydraDir, "repo")
+	expectedRepoDir := filepath.Join(base, "repo")
 	if cfg.RepoDir != expectedRepoDir {
 		t.Errorf("RepoDir = %q, want %q", cfg.RepoDir, expectedRepoDir)
 	}

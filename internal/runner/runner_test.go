@@ -58,7 +58,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	gitRun(t, "init", "--bare", bareDir)
 
 	// Create repo with initial commit and remote.
-	repoDir := filepath.Join(base, ".hydra", "repo")
+	repoDir := filepath.Join(base, "repo")
 	mkdirAll(t, repoDir)
 	gitRun(t, "init", repoDir)
 	gitRun(t, "-C", repoDir, "config", "user.email", "test@test.com")
