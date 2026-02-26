@@ -23,6 +23,7 @@ type ClaudeRunConfig struct {
 	Document   string
 	Model      string
 	AutoAccept bool
+	PlanMode   bool
 }
 
 // ClaudeFunc is the function signature for invoking claude.
@@ -37,6 +38,7 @@ type Runner struct {
 	BaseDir     string            // working directory for lock file; defaults to "."
 	Model       string            // model name override
 	AutoAccept  bool              // auto-accept all tool calls
+	PlanMode    bool              // start Claude in plan mode
 	IssueCloser issues.Closer     // set by merge workflow
 }
 
@@ -214,6 +216,7 @@ func (r *Runner) Run(taskName string) error {
 		Document:   doc,
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
+		PlanMode:   r.PlanMode,
 	}
 	if err := claudeFn(context.Background(), runCfg); err != nil {
 		return err

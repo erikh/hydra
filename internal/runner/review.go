@@ -73,6 +73,7 @@ func (r *Runner) Review(taskName string) error {
 		Document:   doc,
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
+		PlanMode:   r.PlanMode,
 	}
 	if err := claudeFn(context.Background(), runCfg); err != nil {
 		return err

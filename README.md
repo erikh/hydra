@@ -1,5 +1,7 @@
 # Hydra
 
+![Hydra example](example.png)
+
 AI-driven local pull request workflow where Claude is the only contributor.
 
 ## What is Hydra?
@@ -128,7 +130,8 @@ Executes the full task lifecycle:
 
 **Flags:**
 
-- `--auto-accept` / `-y` — Auto-accept all tool calls without prompting
+- `--auto-accept` / `-y` — Auto-accept all tool calls without prompting and disable plan mode for fully autonomous execution
+- `--plan` — Start Claude in plan mode (default behavior; use with `-y` to auto-accept tools but still start in plan mode)
 - `--model` — Override the Claude model (e.g. `--model claude-haiku-4-5-20251001`)
 
 ### `hydra run-group <group-name>`
@@ -137,7 +140,8 @@ Executes all pending tasks in the named group sequentially, in alphabetical orde
 
 **Flags:**
 
-- `--auto-accept` / `-y` — Auto-accept all tool calls without prompting
+- `--auto-accept` / `-y` — Auto-accept all tool calls without prompting and disable plan mode
+- `--plan` — Start Claude in plan mode (default; use with `-y` to auto-accept but still plan)
 - `--model` — Override the Claude model
 
 ### `hydra review`
@@ -154,7 +158,7 @@ hydra review run <task-name> [-y]  # Run interactive review session
 
 `hydra review run` opens a TUI session where Claude reviews the implementation, runs tests, and makes corrections. The task stays in review state after the session.
 
-**`run` flags:** `--auto-accept` / `-y`, `--model`
+**`run` flags:** `--auto-accept` / `-y`, `--plan`, `--model`
 
 ### `hydra merge`
 
@@ -170,7 +174,7 @@ hydra merge run <task-name> [-y]   # Run merge workflow
 
 `hydra merge run` performs: rebase onto `origin/main`, resolve conflicts via Claude if needed, run tests/lint, fast-forward merge, push, record SHA, move to completed, and close the remote issue if applicable.
 
-**`run` flags:** `--auto-accept` / `-y`, `--model`
+**`run` flags:** `--auto-accept` / `-y`, `--plan`, `--model`
 
 ### `hydra other`
 

@@ -196,6 +196,7 @@ func (r *Runner) invokeClaudeForRepo(repoDir, document string) error {
 		Document:   document,
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
+		PlanMode:   r.PlanMode,
 	})
 }
 

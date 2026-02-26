@@ -275,7 +275,11 @@ func runCommand() *cli.Command {
 			&cli.BoolFlag{
 				Name:    "auto-accept",
 				Aliases: []string{"y"},
-				Usage:   "Auto-accept all tool calls without prompting",
+				Usage:   "Auto-accept all tool calls without prompting (disables plan mode)",
+			},
+			&cli.BoolFlag{
+				Name:  "plan",
+				Usage: "Start Claude in plan mode (default; use with -y to auto-accept but still start in plan mode)",
 			},
 			&cli.StringFlag{
 				Name:  "model",
@@ -297,8 +301,13 @@ func runCommand() *cli.Command {
 				return err
 			}
 
+			r.PlanMode = true
 			if c.Bool("auto-accept") {
 				r.AutoAccept = true
+				r.PlanMode = false
+			}
+			if c.Bool("plan") {
+				r.PlanMode = true
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m
@@ -321,7 +330,11 @@ func runGroupCommand() *cli.Command {
 			&cli.BoolFlag{
 				Name:    "auto-accept",
 				Aliases: []string{"y"},
-				Usage:   "Auto-accept all tool calls without prompting",
+				Usage:   "Auto-accept all tool calls without prompting (disables plan mode)",
+			},
+			&cli.BoolFlag{
+				Name:  "plan",
+				Usage: "Start Claude in plan mode (default; use with -y to auto-accept but still start in plan mode)",
 			},
 			&cli.StringFlag{
 				Name:  "model",
@@ -343,8 +356,13 @@ func runGroupCommand() *cli.Command {
 				return err
 			}
 
+			r.PlanMode = true
 			if c.Bool("auto-accept") {
 				r.AutoAccept = true
+				r.PlanMode = false
+			}
+			if c.Bool("plan") {
+				r.PlanMode = true
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m
@@ -594,7 +612,11 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 					&cli.BoolFlag{
 						Name:    "auto-accept",
 						Aliases: []string{"y"},
-						Usage:   "Auto-accept all tool calls without prompting",
+						Usage:   "Auto-accept all tool calls without prompting (disables plan mode)",
+					},
+					&cli.BoolFlag{
+						Name:  "plan",
+						Usage: "Start Claude in plan mode (default; use with -y to auto-accept but still start in plan mode)",
 					},
 					&cli.StringFlag{
 						Name:  "model",
@@ -609,8 +631,13 @@ func stateCommand(name, usage, description, runUsage string, ops stateOps) *cli.
 					if err != nil {
 						return err
 					}
+					r.PlanMode = true
 					if c.Bool("auto-accept") {
 						r.AutoAccept = true
+						r.PlanMode = false
+					}
+					if c.Bool("plan") {
+						r.PlanMode = true
 					}
 					if m := c.String("model"); m != "" {
 						r.Model = m

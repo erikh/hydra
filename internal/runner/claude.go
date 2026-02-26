@@ -18,6 +18,7 @@ func invokeClaude(ctx context.Context, cfg ClaudeRunConfig) error {
 			Model:      modelOrDefault(cfg.Model),
 			WorkDir:    cfg.RepoDir,
 			AutoAccept: cfg.AutoAccept,
+			PlanMode:   cfg.PlanMode,
 		})
 	}
 

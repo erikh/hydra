@@ -13,6 +13,7 @@ type CLIConfig struct {
 	Model      string
 	WorkDir    string
 	AutoAccept bool
+	PlanMode   bool
 }
 
 // FindCLI looks for the `claude` binary on PATH.
@@ -36,6 +37,10 @@ func BuildArgs(cfg CLIConfig) []string {
 
 	if cfg.AutoAccept {
 		args = append(args, "--dangerously-skip-permissions")
+	}
+
+	if cfg.PlanMode {
+		args = append(args, "--plan")
 	}
 
 	// Positional argument: starts an interactive session with this prompt.

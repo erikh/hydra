@@ -22,20 +22,22 @@ func TestBuildArgs(t *testing.T) {
 		{
 			name: "prompt only",
 			cfg: CLIConfig{
-				Prompt: "hello world",
+				Prompt:   "hello world",
+				PlanMode: true,
 			},
-			want: []string{"hello world"},
+			want: []string{"--plan", "hello world"},
 		},
 		{
 			name: "with model",
 			cfg: CLIConfig{
-				Prompt: "do something",
-				Model:  "claude-opus-4-6",
+				Prompt:   "do something",
+				Model:    "claude-opus-4-6",
+				PlanMode: true,
 			},
-			want: []string{"--model", "claude-opus-4-6", "do something"},
+			want: []string{"--model", "claude-opus-4-6", "--plan", "do something"},
 		},
 		{
-			name: "with auto accept",
+			name: "auto accept only",
 			cfg: CLIConfig{
 				Prompt:     "fix bug",
 				AutoAccept: true,
@@ -43,13 +45,23 @@ func TestBuildArgs(t *testing.T) {
 			want: []string{"--dangerously-skip-permissions", "fix bug"},
 		},
 		{
+			name: "auto accept with plan",
+			cfg: CLIConfig{
+				Prompt:     "fix bug",
+				AutoAccept: true,
+				PlanMode:   true,
+			},
+			want: []string{"--dangerously-skip-permissions", "--plan", "fix bug"},
+		},
+		{
 			name: "all options",
 			cfg: CLIConfig{
 				Prompt:     "implement feature",
 				Model:      "claude-sonnet-4-6",
 				AutoAccept: true,
+				PlanMode:   true,
 			},
-			want: []string{"--model", "claude-sonnet-4-6", "--dangerously-skip-permissions", "implement feature"},
+			want: []string{"--model", "claude-sonnet-4-6", "--dangerously-skip-permissions", "--plan", "implement feature"},
 		},
 	}
 
