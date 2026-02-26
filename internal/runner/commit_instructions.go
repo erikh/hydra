@@ -1,6 +1,9 @@
 package runner
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // verificationSection returns a markdown section listing the test and lint
 // commands Claude should run before committing. Returns empty string if
@@ -35,6 +38,9 @@ func verificationSection(commands map[string]string) string {
 		"work directory. Do not modify these commands to use fixed ports, shared temp files, " +
 		"or any global state that would conflict with parallel runs. " +
 		"All test and lint operations must be fully isolated to the current working tree.\n")
+
+	b.WriteString("\nDo NOT run any individual test files, test functions, or lint checks " +
+		"outside of these commands. Only use the exact commands listed above for all testing and linting.\n")
 	return b.String()
 }
 
@@ -48,19 +54,27 @@ func commitInstructions(sign bool, commands map[string]string) string {
 		"Do not run other commands to perform testing or linting. " +
 		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
 
+	step := 1
 	if testCmd, ok := commands["test"]; ok && testCmd != "" {
-		b.WriteString("1. Run the test suite: `")
+		b.WriteString(stepPrefix(step))
+		b.WriteString("Run the test suite: `")
 		b.WriteString(testCmd)
 		b.WriteString("`\n")
+		step++
 	}
 	if lintCmd, ok := commands["lint"]; ok && lintCmd != "" {
-		b.WriteString("2. Run the linter: `")
+		b.WriteString(stepPrefix(step))
+		b.WriteString("Run the linter: `")
 		b.WriteString(lintCmd)
 		b.WriteString("`\n")
+		step++
 	}
 
-	b.WriteString("3. Stage all changes: `git add -A`\n")
-	b.WriteString("4. Commit with a descriptive message. ")
+	b.WriteString(stepPrefix(step))
+	b.WriteString("Stage all changes: `git add -A`\n")
+	step++
+	b.WriteString(stepPrefix(step))
+	b.WriteString("Commit with a descriptive message. ")
 
 	if sign {
 		b.WriteString("Sign the commit: `git commit -S -m \"<descriptive message>\"`\n")
@@ -70,7 +84,14 @@ func commitInstructions(sign bool, commands map[string]string) string {
 
 	b.WriteString("\nIMPORTANT: You MUST commit your changes before finishing. ")
 	b.WriteString("The commit message should describe what was done, not just the task name. ")
-	b.WriteString("Do NOT add Co-Authored-By or any other trailers to the commit message.\n")
+	b.WriteString("Do NOT add Co-Authored-By or any other trailers to the commit message. ")
+	b.WriteString("Do NOT run any individual test files, test functions, or lint checks " +
+		"outside of the commands listed above. Only use the exact commands above for all testing and linting.\n")
 
 	return b.String()
+}
+
+// stepPrefix returns a numbered step prefix like "1. ", "2. ", etc.
+func stepPrefix(n int) string {
+	return fmt.Sprintf("%d. ", n)
 }

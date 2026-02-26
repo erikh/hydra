@@ -105,7 +105,7 @@ func (c *Commands) RunDev(ctx context.Context, workDir string) error {
 func (c *Commands) EffectiveCommands(workDir string) map[string]string {
 	result := make(map[string]string)
 	maps.Copy(result, c.Commands)
-	for _, name := range []string{"clean", "dev", "test", "lint"} {
+	for _, name := range []string{"before", "clean", "dev", "test", "lint"} {
 		if _, ok := result[name]; !ok {
 			if hasMakeTarget(workDir, name) {
 				result[name] = "make " + name

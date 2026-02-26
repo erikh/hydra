@@ -102,6 +102,15 @@ func (r *Runner) commandsMap(workDir string) map[string]string {
 	return nil
 }
 
+// runBeforeHook runs the "before" command from hydra.yml if configured.
+// This runs before every Claude invocation, after the repo is cloned/prepared.
+func (r *Runner) runBeforeHook(workDir string) error {
+	if r.TaskRunner == nil {
+		return nil
+	}
+	return r.TaskRunner.Run("before", workDir)
+}
+
 // workDir returns the work directory path for a task.
 // Ungrouped tasks: work/{name}, grouped tasks: work/{group}/{name}.
 func (r *Runner) workDir(task *design.Task) string {
@@ -215,6 +224,11 @@ func (r *Runner) Run(taskName string) error {
 	cmds := r.commandsMap(wd)
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+
+	// Run before hook.
+	if err := r.runBeforeHook(wd); err != nil {
+		return fmt.Errorf("before hook: %w", err)
+	}
 
 	// Capture HEAD before invoking Claude.
 	beforeSHA, _ := taskRepo.LastCommitSHA()

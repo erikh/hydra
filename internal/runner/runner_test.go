@@ -1308,18 +1308,14 @@ func TestMergeDocumentExclusiveCommands(t *testing.T) {
 	}
 }
 
-func TestTestDocumentExclusiveCommands(t *testing.T) {
-	cmds := map[string]string{
-		"test": "go test ./...",
-		"lint": "golangci-lint run",
-	}
-	result := assembleTestDocument("Task content", cmds)
+func TestTestDocumentDoesNotContainTestLintCommands(t *testing.T) {
+	result := assembleTestDocument("Task content")
 
-	if !strings.Contains(result, "Do not run other commands") {
-		t.Error("missing exclusive commands directive in test document")
+	if strings.Contains(result, "go test") {
+		t.Error("test document should not contain inline test commands")
 	}
-	if !strings.Contains(result, "listed below") {
-		t.Error("directive should reference commands listed below")
+	if strings.Contains(result, "golangci-lint") {
+		t.Error("test document should not contain inline lint commands")
 	}
 }
 
@@ -2200,5 +2196,99 @@ func TestMergeDocumentWithConflicts(t *testing.T) {
 		if !strings.Contains(result, want) {
 			t.Errorf("merge document with conflicts missing %q", want)
 		}
+	}
+}
+
+func TestBeforeHookRunsBeforeClaude(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Configure a before command that creates a marker file.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  before: \"touch before-ran.txt\"\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Verify the before command ran by checking for the marker file.
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		markerPath := filepath.Join(cfg.RepoDir, "before-ran.txt")
+		if _, statErr := os.Stat(markerPath); statErr != nil {
+			t.Error("before hook did not run before Claude invocation")
+		}
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "generated.go"), []byte("package main\n"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+func TestBeforeHookFailureAborts(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Configure a before command that fails.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  before: \"false\"\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	err = r.Run("add-feature")
+	if err == nil {
+		t.Fatal("expected error when before hook fails")
+	}
+	if !strings.Contains(err.Error(), "before hook") {
+		t.Errorf("error = %q, want before hook message", err)
+	}
+}
+
+func TestNoBeforeHookSkipsSilently(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// No before command configured.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"commands:\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Should succeed without a before command.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+func TestDocumentsProhibitIndividualTestLint(t *testing.T) {
+	// Verify that verificationSection and commitInstructions contain
+	// the directive prohibiting individual test/lint runs.
+	cmds := map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	}
+
+	vs := verificationSection(cmds)
+	if !strings.Contains(vs, "Do NOT run any individual test") {
+		t.Error("verificationSection missing individual test prohibition")
+	}
+
+	ci := commitInstructions(false, cmds)
+	if !strings.Contains(ci, "Do NOT run any individual test") {
+		t.Error("commitInstructions missing individual test prohibition")
 	}
 }

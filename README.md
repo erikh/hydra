@@ -276,6 +276,7 @@ gitea_url: https://gitea.example.com
 # work directory, or shared network ports. Each invocation should be fully
 # isolated to its own working tree.
 commands:
+  before: "make deps"
   clean: "make clean"
   dev: "npm run dev"
   test: "go test ./... -count=1"
@@ -284,12 +285,13 @@ commands:
 
 **Command keys:**
 
+- **`before`** — Run by hydra before every Claude invocation (`run`, `review run`, `test`, `merge run`), after the git repository is cloned/prepared. Use this for dependency installation, code generation, or any setup that must happen before Claude starts working. If this command fails, the hydra command aborts.
 - **`clean`** — Run by `hydra clean`. Resets build artifacts or restores the work directory. Not run by Claude.
 - **`dev`** — Run by `hydra review dev`. Starts a long-lived process (dev server, file watcher, etc.) in the task's work directory. Not run by Claude.
 - **`test`** — Run by Claude before committing. Executes the project's test suite.
 - **`lint`** — Run by Claude before committing. Executes the project's linter.
 
-**Makefile fallback:** If a command key is not configured in `hydra.yml`, hydra checks for a `Makefile` in the task's work directory. If a matching make target exists (e.g. `clean:`, `test:`, `lint:`, `dev:`), hydra runs `make <name>` as a fallback. This means projects with a standard Makefile work out of the box without any `hydra.yml` configuration.
+**Makefile fallback:** If a command key is not configured in `hydra.yml`, hydra checks for a `Makefile` in the task's work directory. If a matching make target exists (e.g. `before:`, `clean:`, `test:`, `lint:`, `dev:`), hydra runs `make <name>` as a fallback. This means projects with a standard Makefile work out of the box without any `hydra.yml` configuration.
 
 **Concurrency safety:** Hydra runs each task in its own cloned work directory under `work/`. Multiple tasks can run concurrently, so your test and lint commands must be safe to execute in parallel. Avoid hardcoded ports, shared temp directories, global lock files, or anything else that would collide when two instances run at the same time. Each command should operate entirely within the current working tree.
 
@@ -301,6 +303,8 @@ Hydra appends commit instructions to every document sent to Claude. These instru
 2. Run the `lint` command if configured in `hydra.yml`
 3. Stage all changes with `git add -A`
 4. Commit with a descriptive message (GPG-signed if a signing key is available)
+
+Claude is explicitly instructed to only use the exact test and lint commands from `hydra.yml` — it must not run individual test files, test functions, or lint checks outside of these commands.
 
 After Claude returns, hydra verifies that a commit was made (HEAD moved). If Claude didn't commit, the run fails with an error. This approach lets Claude write meaningful commit messages that describe the actual changes rather than using a generic task name.
 

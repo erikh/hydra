@@ -103,6 +103,11 @@ func (r *Runner) Review(taskName string) error {
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 
+	// Run before hook.
+	if err := r.runBeforeHook(wd); err != nil {
+		return fmt.Errorf("before hook: %w", err)
+	}
+
 	// Capture HEAD before invoking Claude.
 	beforeSHA, _ := taskRepo.LastCommitSHA()
 

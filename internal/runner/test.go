@@ -59,12 +59,17 @@ func (r *Runner) Test(taskName string) error {
 	}
 
 	cmds := r.commandsMap(wd)
-	doc := assembleTestDocument(content, cmds)
+	doc := assembleTestDocument(content)
 
 	// Append verification and commit instructions so Claude handles test/lint/staging/committing.
 	sign := taskRepo.HasSigningKey()
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+
+	// Run before hook.
+	if err := r.runBeforeHook(wd); err != nil {
+		return fmt.Errorf("before hook: %w", err)
+	}
 
 	// Capture HEAD before invoking Claude.
 	beforeSHA, _ := taskRepo.LastCommitSHA()
@@ -113,7 +118,7 @@ func (r *Runner) Test(taskName string) error {
 }
 
 // assembleTestDocument builds a document for the test session.
-func assembleTestDocument(taskContent string, cmds map[string]string) string {
+func assembleTestDocument(taskContent string) string {
 	var b strings.Builder
 
 	b.WriteString("# Task Description\n\n")
@@ -129,18 +134,6 @@ func assembleTestDocument(taskContent string, cmds map[string]string) string {
 	b.WriteString("2. Check which of these already have test coverage\n")
 	b.WriteString("3. Add tests for any features or behaviors that lack coverage\n")
 	b.WriteString("4. Ensure tests cover both success and error paths\n\n")
-
-	b.WriteString("The commands below are the project's official test and lint commands from hydra.yml. " +
-		"Do not run other commands to perform testing or linting. " +
-		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
-
-	if testCmd, ok := cmds["test"]; ok {
-		b.WriteString(fmt.Sprintf("- Run the test suite: `%s`\n", testCmd))
-	}
-	if lintCmd, ok := cmds["lint"]; ok {
-		b.WriteString(fmt.Sprintf("- Run the linter: `%s`\n", lintCmd))
-	}
-	b.WriteString("\n")
 
 	return b.String()
 }

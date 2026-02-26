@@ -71,6 +71,11 @@ func (r *Runner) Merge(taskName string) error {
 	sign := taskRepo.HasSigningKey()
 	doc := assembleMergeDocument(content, conflictFiles, cmds, sign)
 
+	// Run before hook.
+	if err := r.runBeforeHook(wd); err != nil {
+		return fmt.Errorf("before hook: %w", err)
+	}
+
 	claudeFn := r.Claude
 	if claudeFn == nil {
 		claudeFn = invokeClaude
