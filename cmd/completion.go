@@ -252,21 +252,9 @@ func promptCompletionInstall() {
 		}
 		_ = writeCompletionStub(true)
 		fmt.Fprintf(os.Stderr, "Completion installed in %s.\n", rcPath)
-		activateCompletion(shell)
 	} else {
 		_ = writeCompletionStub(false)
 		fmt.Fprintf(os.Stderr, "Skipped. You can install later with: hydra completion install\n")
-	}
-}
-
-// activateCompletion prints the completion script to stdout so the calling
-// shell can eval it immediately (e.g. `eval "$(hydra completion install)"`).
-func activateCompletion(shell string) {
-	switch shell {
-	case "bash":
-		fmt.Print(bashCompletionScript)
-	case "zsh":
-		fmt.Print(zshCompletionScript)
 	}
 }
 
@@ -318,7 +306,6 @@ func completionCommand() *cli.Command {
 					}
 					_ = writeCompletionStub(true)
 					fmt.Fprintf(os.Stderr, "Completion installed in %s.\n", rcPath)
-					activateCompletion(shell)
 					return nil
 				},
 			},

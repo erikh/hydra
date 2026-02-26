@@ -267,7 +267,7 @@ hydra completion install     # Inject completion into your shell RC file
 hydra completion uninstall   # Remove completion from your shell RC file
 ```
 
-`install` injects a one-liner into your RC file (`~/.bashrc` or `~/.zshrc`) that evals `hydra completion <shell>` at startup, guarded by a `command -v hydra` check so it no-ops if hydra is not installed. Both `install` and the first-run prompt also print the completion script to stdout, so completion activates immediately in the current session. Supports bash and zsh, detected from `$SHELL`. On first run, hydra automatically prompts to install completion; the decision is saved in `~/.hydra/completion`.
+`install` injects a one-liner into your RC file (`~/.bashrc` or `~/.zshrc`) that evals `hydra completion <shell>` at startup, guarded by a `command -v hydra` check so it no-ops if hydra is not installed. Supports bash and zsh, detected from `$SHELL`. On first run, hydra automatically prompts to install completion; the decision is saved in `~/.hydra/completion`.
 
 ## hydra.yml
 
