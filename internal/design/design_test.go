@@ -219,7 +219,7 @@ func TestAssembleDocumentFull(t *testing.T) {
 	dir := setupDesignDir(t)
 	dd, _ := NewDir(dir)
 
-	doc, err := dd.AssembleDocument("Build the widget.")
+	doc, err := dd.AssembleDocument("Build the widget.", "")
 	if err != nil {
 		t.Fatalf("AssembleDocument: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestAssembleDocumentMinimal(t *testing.T) {
 
 	dd, _ := NewDir(dir)
 
-	doc, err := dd.AssembleDocument("Do something.")
+	doc, err := dd.AssembleDocument("Do something.", "")
 	if err != nil {
 		t.Fatalf("AssembleDocument: %v", err)
 	}
@@ -782,6 +782,105 @@ func TestEditNewTaskSlashRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/") {
 		t.Errorf("error = %q, want message about slash", err)
+	}
+}
+
+func TestGroupContent(t *testing.T) {
+	dir := setupDesignDir(t)
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "backend", "group.md"), []byte("Backend group context."), 0o600))
+
+	dd, _ := NewDir(dir)
+	content, err := dd.GroupContent("backend")
+	if err != nil {
+		t.Fatalf("GroupContent: %v", err)
+	}
+	if content != "Backend group context." {
+		t.Errorf("GroupContent = %q, want %q", content, "Backend group context.")
+	}
+}
+
+func TestGroupContentMissing(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDir(dir)
+
+	content, err := dd.GroupContent("backend")
+	if err != nil {
+		t.Fatalf("GroupContent: %v", err)
+	}
+	if content != "" {
+		t.Errorf("GroupContent = %q, want empty", content)
+	}
+}
+
+func TestGroupContentEmptyGroup(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDir(dir)
+
+	content, err := dd.GroupContent("")
+	if err != nil {
+		t.Fatalf("GroupContent: %v", err)
+	}
+	if content != "" {
+		t.Errorf("GroupContent = %q, want empty", content)
+	}
+}
+
+func TestAssembleDocumentWithGroup(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDir(dir)
+
+	doc, err := dd.AssembleDocument("Build the widget.", "Backend group context.")
+	if err != nil {
+		t.Fatalf("AssembleDocument: %v", err)
+	}
+
+	if !strings.Contains(doc, "# Group") {
+		t.Error("missing Group section")
+	}
+	if !strings.Contains(doc, "Backend group context.") {
+		t.Error("missing group content")
+	}
+
+	// Verify ordering: Lint before Group before Task.
+	lintIdx := strings.Index(doc, "# Lint Rules")
+	groupIdx := strings.Index(doc, "# Group")
+	taskIdx := strings.Index(doc, "# Task")
+
+	if lintIdx >= groupIdx || groupIdx >= taskIdx {
+		t.Error("Group section is not between Lint and Task")
+	}
+}
+
+func TestAssembleDocumentWithoutGroup(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDir(dir)
+
+	doc, err := dd.AssembleDocument("Build the widget.", "")
+	if err != nil {
+		t.Fatalf("AssembleDocument: %v", err)
+	}
+
+	if strings.Contains(doc, "# Group") {
+		t.Error("should not include Group section when group content is empty")
+	}
+}
+
+func TestPendingTasksSkipsGroupMd(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(dir, "tasks", "mygroup"), 0o750))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "mygroup", "group.md"), []byte("heading"), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "tasks", "mygroup", "real-task.md"), []byte("task"), 0o600))
+
+	dd, _ := NewDir(dir)
+	tasks, err := dd.PendingTasks()
+	if err != nil {
+		t.Fatalf("PendingTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Name != "real-task" {
+		t.Errorf("Name = %q, want real-task", tasks[0].Name)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
@@ -89,7 +90,12 @@ func (r *Runner) Run(taskName string) error {
 		return err
 	}
 
-	doc, err := r.Design.AssembleDocument(content)
+	groupContent, err := r.Design.GroupContent(task.Group)
+	if err != nil {
+		return fmt.Errorf("reading group content: %w", err)
+	}
+
+	doc, err := r.Design.AssembleDocument(content, groupContent)
 	if err != nil {
 		return fmt.Errorf("assembling document: %w", err)
 	}
@@ -153,5 +159,50 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	fmt.Printf("Task %q completed successfully. Branch: %s\n", taskName, branch)
+	return nil
+}
+
+// RunGroup executes all pending tasks in a group sequentially.
+// Between tasks, it checks out the base branch so each task starts from a clean state.
+func (r *Runner) RunGroup(groupName string) error {
+	baseBranch, err := r.Repo.CurrentBranch()
+	if err != nil {
+		return fmt.Errorf("getting current branch: %w", err)
+	}
+
+	tasks, err := r.Design.PendingTasks()
+	if err != nil {
+		return fmt.Errorf("listing pending tasks: %w", err)
+	}
+
+	var groupTasks []design.Task
+	for _, t := range tasks {
+		if t.Group == groupName {
+			groupTasks = append(groupTasks, t)
+		}
+	}
+
+	if len(groupTasks) == 0 {
+		return fmt.Errorf("no pending tasks found in group %q", groupName)
+	}
+
+	sort.Slice(groupTasks, func(i, j int) bool {
+		return groupTasks[i].Name < groupTasks[j].Name
+	})
+
+	for i, t := range groupTasks {
+		taskRef := groupName + "/" + t.Name
+		if err := r.Run(taskRef); err != nil {
+			return fmt.Errorf("task %s: %w", taskRef, err)
+		}
+
+		// Reset to base branch between tasks (skip after last task).
+		if i < len(groupTasks)-1 {
+			if err := r.Repo.Checkout(baseBranch); err != nil {
+				return fmt.Errorf("checking out base branch: %w", err)
+			}
+		}
+	}
+
 	return nil
 }

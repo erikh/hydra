@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +46,9 @@ func setupTestEnv(t *testing.T) *testEnv {
 	writeFile(t, filepath.Join(designDir, "tasks", "another-task.md"), "Do another thing.")
 
 	mkdirAll(t, filepath.Join(designDir, "tasks", "backend"))
+	writeFile(t, filepath.Join(designDir, "tasks", "backend", "group.md"), "Backend group shared context.")
 	writeFile(t, filepath.Join(designDir, "tasks", "backend", "add-api.md"), "Build API.")
+	writeFile(t, filepath.Join(designDir, "tasks", "backend", "add-db.md"), "Add database layer.")
 
 	// Create hydra.yml with passing commands.
 	writeFile(t, filepath.Join(designDir, "hydra.yml"), "commands:\n  test: \"true\"\n  lint: \"true\"\n")
@@ -455,13 +458,10 @@ func TestRunTaskStateAfterMultipleRuns(t *testing.T) {
 		t.Errorf("expected 2 review tasks, got %d", len(review))
 	}
 
-	// Pending should have only the grouped task left.
+	// Pending should have only the grouped tasks left.
 	pending, _ := dd.PendingTasks()
-	if len(pending) != 1 {
-		t.Errorf("expected 1 pending task, got %d", len(pending))
-	}
-	if pending[0].Name != "add-api" {
-		t.Errorf("remaining task = %q, want add-api", pending[0].Name)
+	if len(pending) != 2 {
+		t.Errorf("expected 2 pending tasks, got %d", len(pending))
 	}
 }
 
@@ -556,5 +556,142 @@ func TestRunRecordsSHA(t *testing.T) {
 	actualSHA := strings.TrimSpace(string(out))
 	if entries[0]["sha"] != actualSHA {
 		t.Errorf("recorded SHA = %q, actual = %q", entries[0]["sha"], actualSHA)
+	}
+}
+
+func TestRunGroupedTaskIncludesGroupContent(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("backend/add-api"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(captured, "# Group") {
+		t.Error("document missing Group section")
+	}
+	if !strings.Contains(captured, "Backend group shared context.") {
+		t.Error("document missing group content")
+	}
+	if !strings.Contains(captured, "Build API.") {
+		t.Error("document missing task content")
+	}
+}
+
+func TestRunGroupFullWorkflow(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Use a unique file per invocation to avoid "no changes" error.
+	callCount := 0
+	r.Claude = func(repoDir, _ string) error {
+		callCount++
+		fname := fmt.Sprintf("generated-%d.go", callCount)
+		return os.WriteFile(filepath.Join(repoDir, fname), []byte("package main\n"), 0o600)
+	}
+	r.BaseDir = env.BaseDir
+
+	if err := r.RunGroup("backend"); err != nil {
+		t.Fatalf("RunGroup: %v", err)
+	}
+
+	// Both backend tasks should be in review.
+	dd, _ := design.NewDir(env.DesignDir)
+	review, _ := dd.TasksByState(design.StateReview)
+
+	reviewNames := map[string]bool{}
+	for _, t := range review {
+		reviewNames[t.Name] = true
+	}
+	if !reviewNames["add-api"] || !reviewNames["add-db"] {
+		t.Errorf("expected add-api and add-db in review, got %v", review)
+	}
+
+	// No backend tasks should remain pending.
+	pending, _ := dd.PendingTasks()
+	for _, p := range pending {
+		if p.Group == "backend" {
+			t.Errorf("unexpected pending backend task: %s", p.Name)
+		}
+	}
+}
+
+func TestRunGroupStopsOnError(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// First call succeeds, second fails.
+	callCount := 0
+	r.Claude = func(repoDir, _ string) error {
+		callCount++
+		if callCount == 1 {
+			fname := fmt.Sprintf("generated-%d.go", callCount)
+			return os.WriteFile(filepath.Join(repoDir, fname), []byte("package main\n"), 0o600)
+		}
+		return errors.New("claude crashed")
+	}
+	r.BaseDir = env.BaseDir
+
+	err = r.RunGroup("backend")
+	if err == nil {
+		t.Fatal("expected error from RunGroup")
+	}
+	if !strings.Contains(err.Error(), "claude crashed") {
+		t.Errorf("error = %q, want claude crashed", err)
+	}
+
+	// First task (add-api, alphabetically first) should be in review.
+	dd, _ := design.NewDir(env.DesignDir)
+	review, _ := dd.TasksByState(design.StateReview)
+	if len(review) != 1 || review[0].Name != "add-api" {
+		t.Errorf("review tasks = %v, want [add-api]", review)
+	}
+
+	// Second task (add-db) should still be pending.
+	pending, _ := dd.PendingTasks()
+	foundDB := false
+	for _, p := range pending {
+		if p.Group == "backend" && p.Name == "add-db" {
+			foundDB = true
+		}
+	}
+	if !foundDB {
+		t.Error("add-db should still be pending")
+	}
+}
+
+func TestRunGroupEmptyError(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	err = r.RunGroup("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent group")
+	}
+	if !strings.Contains(err.Error(), "no pending tasks") {
+		t.Errorf("error = %q, want no pending tasks message", err)
 	}
 }

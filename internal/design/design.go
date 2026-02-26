@@ -99,8 +99,18 @@ func Scaffold(path string) error {
 	return nil
 }
 
-// AssembleDocument builds a single markdown document from rules, lint, task content, and functional specs.
-func (d *Dir) AssembleDocument(taskContent string) (string, error) {
+// GroupContent returns the content of the group heading file (tasks/{group}/group.md).
+// Returns empty string if the group is empty or the file doesn't exist.
+func (d *Dir) GroupContent(group string) (string, error) {
+	if group == "" {
+		return "", nil
+	}
+	return d.readFile(filepath.Join("tasks", group, "group.md"))
+}
+
+// AssembleDocument builds a single markdown document from rules, lint, group heading, task content, and functional specs.
+// The groupContent parameter is included as a "# Group" section between lint and task if non-empty.
+func (d *Dir) AssembleDocument(taskContent, groupContent string) (string, error) {
 	rules, err := d.Rules()
 	if err != nil {
 		return "", err
@@ -122,6 +132,9 @@ func (d *Dir) AssembleDocument(taskContent string) (string, error) {
 	}
 	if lint != "" {
 		doc += "# Lint Rules\n\n" + lint + "\n\n"
+	}
+	if groupContent != "" {
+		doc += "# Group\n\n" + groupContent + "\n\n"
 	}
 	doc += "# Task\n\n" + taskContent + "\n\n"
 	if functional != "" {

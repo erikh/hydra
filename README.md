@@ -24,9 +24,14 @@ hydra edit add-auth
 # Run the task
 hydra run add-auth
 
+# Run all tasks in a group
+hydra run-group backend
+
 # Check progress
 hydra status
 ```
+
+All commands work from subdirectories — hydra searches upward for `.hydra/config.json`.
 
 ## Commands
 
@@ -59,6 +64,12 @@ Executes the full task lifecycle:
 
 Commits are GPG-signed if `user.signingkey` is configured in git. Stale locks from dead processes are automatically recovered.
 
+### `hydra run-group <group-name>`
+
+Executes all pending tasks in the named group sequentially, in alphabetical order by task name. Between tasks, the base branch is restored so each task starts from a clean state. Stops immediately on the first error.
+
+If a `group.md` file exists in the group directory (`tasks/{group}/group.md`), its content is included as a `# Group` section in every task's assembled document.
+
 ### `hydra list`
 
 Lists all pending tasks from the `tasks/` directory. Grouped tasks are displayed as `group/name`.
@@ -82,6 +93,7 @@ design-dir/
 ├── tasks/                            # Pending task files
 │   ├── {name}.md                     # Individual task
 │   └── {group}/                      # Task group (subdirectory)
+│       ├── group.md                  # Optional group heading (shared context)
 │       └── {name}.md                 # Grouped task
 ├── other/                            # Miscellaneous files
 ├── state/
@@ -121,6 +133,9 @@ When a task runs, hydra assembles a single markdown document sent to Claude:
 # Lint Rules
 {contents of lint.md}
 
+# Group
+{contents of tasks/{group}/group.md}
+
 # Task
 {contents of the task .md file}
 
@@ -128,7 +143,7 @@ When a task runs, hydra assembles a single markdown document sent to Claude:
 {contents of functional.md}
 ```
 
-Sections with empty or missing source files are omitted entirely.
+Sections with empty or missing source files are omitted entirely. The `# Group` section is only included for grouped tasks that have a `group.md` file.
 
 ## Project Layout
 

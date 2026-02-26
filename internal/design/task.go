@@ -81,6 +81,10 @@ func (d *Dir) discoverTasks(dir string, group string, state TaskState) ([]Task, 
 			continue
 		}
 
+		if entry.Name() == "group.md" {
+			continue
+		}
+
 		name := strings.TrimSuffix(entry.Name(), ".md")
 		tasks = append(tasks, Task{
 			Name:     name,

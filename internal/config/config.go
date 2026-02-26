@@ -101,3 +101,25 @@ func (c *Config) Save(base string) error {
 
 // ErrNoConfig is returned when no configuration file is found.
 var ErrNoConfig = errors.New("no hydra configuration found")
+
+// Discover searches upward from the current working directory for a .hydra/config.json file.
+// It returns the loaded Config if found, or ErrNoConfig if no config exists in any parent directory.
+func Discover() (*Config, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("getting working directory: %w", err)
+	}
+
+	for {
+		configPath := Path(dir)
+		if _, err := os.Stat(configPath); err == nil {
+			return Load(dir)
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, ErrNoConfig
+		}
+		dir = parent
+	}
+}

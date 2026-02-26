@@ -2,10 +2,13 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+const testRepoURL = "https://github.com/test/repo.git"
 
 func TestHydraPath(t *testing.T) {
 	got := HydraPath("/tmp/project")
@@ -27,12 +30,12 @@ func TestInitCreatesDirectoryAndConfig(t *testing.T) {
 	base := t.TempDir()
 	designDir := t.TempDir()
 
-	cfg, err := Init(base, "https://github.com/test/repo.git", designDir)
+	cfg, err := Init(base, testRepoURL, designDir)
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
-	if cfg.SourceRepoURL != "https://github.com/test/repo.git" {
+	if cfg.SourceRepoURL != testRepoURL {
 		t.Errorf("SourceRepoURL = %q, want test URL", cfg.SourceRepoURL)
 	}
 
@@ -75,7 +78,7 @@ func TestLoadRoundTrip(t *testing.T) {
 	base := t.TempDir()
 	designDir := t.TempDir()
 
-	original, err := Init(base, "https://github.com/test/repo.git", designDir)
+	original, err := Init(base, testRepoURL, designDir)
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -108,7 +111,7 @@ func TestSaveOverwrite(t *testing.T) {
 	base := t.TempDir()
 	designDir := t.TempDir()
 
-	cfg, err := Init(base, "https://github.com/test/repo.git", designDir)
+	cfg, err := Init(base, testRepoURL, designDir)
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -125,5 +128,61 @@ func TestSaveOverwrite(t *testing.T) {
 
 	if loaded.SourceRepoURL != "https://github.com/test/other.git" {
 		t.Errorf("SourceRepoURL = %q, want updated URL", loaded.SourceRepoURL)
+	}
+}
+
+func TestDiscoverFromSubdir(t *testing.T) {
+	base := t.TempDir()
+	designDir := t.TempDir()
+
+	_, err := Init(base, testRepoURL, designDir)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Create a subdirectory and chdir into it.
+	subdir := filepath.Join(base, "sub", "deep")
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(subdir)
+
+	cfg, err := Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if cfg.SourceRepoURL != testRepoURL {
+		t.Errorf("SourceRepoURL = %q", cfg.SourceRepoURL)
+	}
+}
+
+func TestDiscoverFromRoot(t *testing.T) {
+	base := t.TempDir()
+	designDir := t.TempDir()
+
+	_, err := Init(base, testRepoURL, designDir)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	t.Chdir(base)
+
+	cfg, err := Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if cfg.SourceRepoURL != testRepoURL {
+		t.Errorf("SourceRepoURL = %q", cfg.SourceRepoURL)
+	}
+}
+
+func TestDiscoverNotFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	_, err := Discover()
+	if !errors.Is(err, ErrNoConfig) {
+		t.Errorf("Discover error = %v, want ErrNoConfig", err)
 	}
 }

@@ -26,6 +26,7 @@ func NewApp() *cli.App {
 		Commands: []*cli.Command{
 			initCommand(),
 			runCommand(),
+			runGroupCommand(),
 			editCommand(),
 			statusCommand(),
 			listCommand(),
@@ -108,7 +109,7 @@ func editCommand() *cli.Command {
 				return errors.New("usage: hydra edit <task-name>")
 			}
 
-			cfg, err := config.Load(".")
+			cfg, err := config.Discover()
 			if err != nil {
 				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
 			}
@@ -140,7 +141,7 @@ func runCommand() *cli.Command {
 				return errors.New("usage: hydra run <task-name>")
 			}
 
-			cfg, err := config.Load(".")
+			cfg, err := config.Discover()
 			if err != nil {
 				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
 			}
@@ -155,6 +156,34 @@ func runCommand() *cli.Command {
 	}
 }
 
+func runGroupCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "run-group",
+		Usage:     "Execute all pending tasks in a group sequentially",
+		ArgsUsage: "<group-name>",
+		Description: "Runs all pending tasks in the named group in alphabetical order. " +
+			"Between tasks, the base branch is restored so each task starts from a clean state. " +
+			"Stops immediately on the first error.",
+		Action: func(c *cli.Context) error {
+			if c.NArg() != 1 {
+				return errors.New("usage: hydra run-group <group-name>")
+			}
+
+			cfg, err := config.Discover()
+			if err != nil {
+				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
+			}
+
+			r, err := runner.New(cfg)
+			if err != nil {
+				return err
+			}
+
+			return r.RunGroup(c.Args().Get(0))
+		},
+	}
+}
+
 func statusCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "status",
@@ -162,7 +191,7 @@ func statusCommand() *cli.Command {
 		Description: "Displays tasks grouped by state (pending, review, merge, completed, abandoned) " +
 			"and shows any currently running task with its PID.",
 		Action: func(_ *cli.Context) error {
-			cfg, err := config.Load(".")
+			cfg, err := config.Discover()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
@@ -217,7 +246,7 @@ func listCommand() *cli.Command {
 		Description: "Shows all pending tasks from the design directory's tasks/ folder, " +
 			"including grouped tasks displayed as group/name.",
 		Action: func(_ *cli.Context) error {
-			cfg, err := config.Load(".")
+			cfg, err := config.Discover()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
@@ -258,7 +287,7 @@ func milestoneCommand() *cli.Command {
 			"milestone scores from milestone/history/. Milestones are date-based markdown " +
 			"files; history entries include a letter grade (A-F).",
 		Action: func(_ *cli.Context) error {
-			cfg, err := config.Load(".")
+			cfg, err := config.Discover()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
