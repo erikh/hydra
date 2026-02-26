@@ -210,7 +210,7 @@ hydra merge run <task-name>        # Run merge workflow
 1. Rebase onto `origin/main`, resolve conflicts via Claude if needed
 2. Run tests/lint, fix failures via Claude if needed
 3. **Pre-merge verification** — Claude double-checks commit messages against the task document, verifies test coverage, runs lint and tests, and fixes any issues
-4. Rebase task branch into main, push, record SHA, move to completed, and close the remote issue if applicable
+4. Rebase task branch into main, push, record SHA, move to completed, close the remote issue if applicable, and delete the remote feature branch
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
@@ -241,6 +241,13 @@ Lists all pending tasks. Grouped tasks are displayed as `group/name`.
 ### `hydra status`
 
 Shows tasks grouped by state (pending, review, merge, completed, abandoned) and any currently running task.
+
+**Flags:**
+
+- `--json` / `-j` — Output as JSON instead of YAML
+- `--no-color` — Disable syntax highlighting
+
+When stdout is a TTY, output is syntax-highlighted using the active color theme.
 
 ### `hydra milestone`
 
@@ -328,6 +335,30 @@ project/
 ```
 
 Work directories persist between runs. On subsequent runs, hydra syncs the existing directory (fetch) instead of re-cloning.
+
+## Global Configuration (`~/.hydra.yml`)
+
+A global config file at `~/.hydra.yml` lets you customize the TUI color scheme. Colors defined here override pywal and the built-in defaults.
+
+```yaml
+colors:
+  bg: "#1a1b26"
+  fg: "#c0caf5"
+  accent: "#7aa2f7"
+  success: "#9ece6a"
+  error: "#f7768e"
+  warning: "#e0af68"
+  muted: "#565f89"
+  highlight: "#bb9af7"
+```
+
+All fields are optional. Missing fields fall through to pywal (`~/.cache/wal/colors.json`) if available, then to the built-in defaults.
+
+**Color priority** (highest to lowest):
+
+1. `~/.hydra.yml`
+2. pywal
+3. Built-in defaults
 
 ## Building & Releasing
 
