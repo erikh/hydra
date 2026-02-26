@@ -250,7 +250,7 @@ func promptCompletionInstall() {
 			_ = writeCompletionStub(false)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Completion installed. Restart your shell or run: source %s\n", rcPath)
+		fmt.Fprintf(os.Stderr, "Completion installed. Run: exec $SHELL or source %s\n", rcPath)
 		_ = writeCompletionStub(true)
 	} else {
 		_ = writeCompletionStub(false)
@@ -305,7 +305,7 @@ func completionCommand() *cli.Command {
 						return fmt.Errorf("injecting completion: %w", err)
 					}
 					_ = writeCompletionStub(true)
-					fmt.Fprintf(os.Stderr, "Completion installed in %s. Restart your shell or run: source %s\n", rcPath, rcPath)
+					fmt.Fprintf(os.Stderr, "Completion installed in %s. Run: exec $SHELL or source %s\n", rcPath, rcPath)
 					return nil
 				},
 			},
@@ -333,7 +333,7 @@ func completionCommand() *cli.Command {
 					if p != "" {
 						_ = os.Remove(p)
 					}
-					fmt.Fprintf(os.Stderr, "Completion removed from %s. Restart your shell or run: source %s\n", rcPath, rcPath)
+					fmt.Fprintf(os.Stderr, "Completion removed from %s. Run: exec $SHELL or source %s\n", rcPath, rcPath)
 					return nil
 				},
 			},
