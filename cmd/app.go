@@ -19,11 +19,10 @@ import (
 func NewApp() *cli.App {
 	return &cli.App{
 		Name:  "hydra",
-		Usage: "Drive development tasks from design documents",
-		Description: "Hydra drives development tasks from a tree of markdown design documents " +
-			"against a source code repository. It integrates with the Claude CLI to execute " +
-			"design tasks and manage the full development lifecycle including testing, linting, " +
-			"and commit tracking.",
+		Usage: "Local pull request workflow where Claude is the only contributor",
+		Description: "Hydra turns markdown design documents into branches, code, and commits. " +
+			"It assembles context from your design docs, hands it to Claude, runs tests and " +
+			"linting, and pushes a branch ready for your review.",
 		Commands: []*cli.Command{
 			initCommand(),
 			runCommand(),
