@@ -79,10 +79,10 @@ go install github.com/erikh/hydra@latest
 
 ### Credentials
 
-Hydra calls the Anthropic API directly. Credentials are resolved in order:
+Hydra supports two execution paths, chosen automatically:
 
-1. **Claude CLI credentials** (checked first): Hydra reads `~/.claude/.credentials.json` (the OAuth token from the Claude CLI)
-2. **Environment variable** (fallback): set `ANTHROPIC_API_KEY`
+1. **Claude Code CLI** (preferred): If the `claude` CLI is installed and on your PATH, hydra shells out to it directly. This uses whatever authentication the CLI has configured (OAuth login via `claude login`, etc.) and provides Claude Code's own interactive terminal UI.
+2. **Direct API** (fallback): If the `claude` CLI is not found, hydra calls the Anthropic API directly using `ANTHROPIC_API_KEY` and provides its own built-in TUI.
 
 ## Quick Example: Issue to Merge
 

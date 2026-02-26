@@ -10,15 +10,35 @@ import (
 )
 
 func invokeClaude(ctx context.Context, cfg ClaudeRunConfig) error {
+	// Try Claude Code CLI first.
+	if cliPath := claude.FindCLI(); cliPath != "" {
+		return claude.RunCLI(ctx, claude.CLIConfig{
+			CLIPath:    cliPath,
+			Prompt:     cfg.Document,
+			Model:      modelOrDefault(cfg.Model),
+			WorkDir:    cfg.RepoDir,
+			AutoAccept: cfg.AutoAccept,
+		})
+	}
+
+	// Fall back to direct API + TUI.
+	return invokeClaudeDirect(ctx, cfg)
+}
+
+func modelOrDefault(model string) string {
+	if model == "" {
+		return claude.DefaultModel
+	}
+	return model
+}
+
+func invokeClaudeDirect(ctx context.Context, cfg ClaudeRunConfig) error {
 	creds, err := claude.LoadCredentials()
 	if err != nil {
 		return fmt.Errorf("loading credentials: %w", err)
 	}
 
-	model := cfg.Model
-	if model == "" {
-		model = claude.DefaultModel
-	}
+	model := modelOrDefault(cfg.Model)
 
 	client, err := claude.NewClient(creds, claude.ClientConfig{
 		Model:   model,
