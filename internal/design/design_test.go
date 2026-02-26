@@ -1,0 +1,452 @@
+package design
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func setupDesignDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	os.WriteFile(filepath.Join(dir, "rules.md"), []byte("Use Go idioms."), 0o644)
+	os.WriteFile(filepath.Join(dir, "lint.md"), []byte("Run gofmt."), 0o644)
+	os.WriteFile(filepath.Join(dir, "functional.md"), []byte("All tests pass."), 0o644)
+
+	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
+	os.WriteFile(filepath.Join(dir, "tasks", "add-auth.md"), []byte("Add authentication."), 0o644)
+	os.WriteFile(filepath.Join(dir, "tasks", "fix-bug.md"), []byte("Fix the login bug."), 0o644)
+
+	os.MkdirAll(filepath.Join(dir, "tasks", "backend"), 0o755)
+	os.WriteFile(filepath.Join(dir, "tasks", "backend", "add-api.md"), []byte("Add REST API."), 0o644)
+
+	os.MkdirAll(filepath.Join(dir, "state", "review"), 0o755)
+	os.WriteFile(filepath.Join(dir, "state", "review", "old-task.md"), []byte("Done."), 0o644)
+
+	os.MkdirAll(filepath.Join(dir, "state", "completed"), 0o755)
+	os.WriteFile(filepath.Join(dir, "state", "completed", "shipped.md"), []byte("Shipped."), 0o644)
+
+	return dir
+}
+
+func TestNewDesignDir(t *testing.T) {
+	dir := setupDesignDir(t)
+
+	dd, err := NewDesignDir(dir)
+	if err != nil {
+		t.Fatalf("NewDesignDir: %v", err)
+	}
+
+	if dd.Path == "" {
+		t.Fatal("Path is empty")
+	}
+}
+
+func TestNewDesignDirNotExist(t *testing.T) {
+	_, err := NewDesignDir("/nonexistent/path/xyz")
+	if err == nil {
+		t.Fatal("expected error for non-existent dir")
+	}
+}
+
+func TestNewDesignDirIsFile(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "file.txt")
+	os.WriteFile(f, []byte("hi"), 0o644)
+
+	_, err := NewDesignDir(f)
+	if err == nil {
+		t.Fatal("expected error for file instead of dir")
+	}
+}
+
+func TestRules(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	rules, err := dd.Rules()
+	if err != nil {
+		t.Fatalf("Rules: %v", err)
+	}
+	if rules != "Use Go idioms." {
+		t.Errorf("Rules = %q", rules)
+	}
+}
+
+func TestLint(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	lint, err := dd.Lint()
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if lint != "Run gofmt." {
+		t.Errorf("Lint = %q", lint)
+	}
+}
+
+func TestFunctional(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	fn, err := dd.Functional()
+	if err != nil {
+		t.Fatalf("Functional: %v", err)
+	}
+	if fn != "All tests pass." {
+		t.Errorf("Functional = %q", fn)
+	}
+}
+
+func TestMissingOptionalFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
+
+	dd, _ := NewDesignDir(dir)
+
+	rules, err := dd.Rules()
+	if err != nil {
+		t.Fatalf("Rules: %v", err)
+	}
+	if rules != "" {
+		t.Errorf("expected empty rules, got %q", rules)
+	}
+
+	lint, err := dd.Lint()
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if lint != "" {
+		t.Errorf("expected empty lint, got %q", lint)
+	}
+
+	fn, err := dd.Functional()
+	if err != nil {
+		t.Fatalf("Functional: %v", err)
+	}
+	if fn != "" {
+		t.Errorf("expected empty functional, got %q", fn)
+	}
+}
+
+func TestAssembleDocumentFull(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	doc, err := dd.AssembleDocument("Build the widget.")
+	if err != nil {
+		t.Fatalf("AssembleDocument: %v", err)
+	}
+
+	if !strings.Contains(doc, "# Rules") {
+		t.Error("missing Rules section")
+	}
+	if !strings.Contains(doc, "Use Go idioms.") {
+		t.Error("missing rules content")
+	}
+	if !strings.Contains(doc, "# Lint Rules") {
+		t.Error("missing Lint Rules section")
+	}
+	if !strings.Contains(doc, "Run gofmt.") {
+		t.Error("missing lint content")
+	}
+	if !strings.Contains(doc, "# Task") {
+		t.Error("missing Task section")
+	}
+	if !strings.Contains(doc, "Build the widget.") {
+		t.Error("missing task content")
+	}
+	if !strings.Contains(doc, "# Functional Tests") {
+		t.Error("missing Functional Tests section")
+	}
+	if !strings.Contains(doc, "All tests pass.") {
+		t.Error("missing functional content")
+	}
+
+	// Verify ordering: Rules before Lint before Task before Functional
+	rulesIdx := strings.Index(doc, "# Rules")
+	lintIdx := strings.Index(doc, "# Lint Rules")
+	taskIdx := strings.Index(doc, "# Task")
+	funcIdx := strings.Index(doc, "# Functional Tests")
+
+	if rulesIdx >= lintIdx || lintIdx >= taskIdx || taskIdx >= funcIdx {
+		t.Error("sections are not in the correct order")
+	}
+}
+
+func TestAssembleDocumentMinimal(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
+
+	dd, _ := NewDesignDir(dir)
+
+	doc, err := dd.AssembleDocument("Do something.")
+	if err != nil {
+		t.Fatalf("AssembleDocument: %v", err)
+	}
+
+	if strings.Contains(doc, "# Rules") {
+		t.Error("should not include empty Rules section")
+	}
+	if strings.Contains(doc, "# Lint Rules") {
+		t.Error("should not include empty Lint section")
+	}
+	if !strings.Contains(doc, "# Task") {
+		t.Error("missing Task section")
+	}
+	if strings.Contains(doc, "# Functional Tests") {
+		t.Error("should not include empty Functional section")
+	}
+}
+
+func TestPendingTasks(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	tasks, err := dd.PendingTasks()
+	if err != nil {
+		t.Fatalf("PendingTasks: %v", err)
+	}
+
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 pending tasks, got %d", len(tasks))
+	}
+
+	names := map[string]bool{}
+	for _, task := range tasks {
+		key := task.Name
+		if task.Group != "" {
+			key = task.Group + "/" + task.Name
+		}
+		names[key] = true
+	}
+
+	for _, want := range []string{"add-auth", "fix-bug", "backend/add-api"} {
+		if !names[want] {
+			t.Errorf("missing task %q", want)
+		}
+	}
+}
+
+func TestPendingTasksEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	dd, _ := NewDesignDir(dir)
+
+	tasks, err := dd.PendingTasks()
+	if err != nil {
+		t.Fatalf("PendingTasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+}
+
+func TestTasksByState(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	review, err := dd.TasksByState(StateReview)
+	if err != nil {
+		t.Fatalf("TasksByState review: %v", err)
+	}
+	if len(review) != 1 || review[0].Name != "old-task" {
+		t.Errorf("review tasks = %v", review)
+	}
+
+	completed, err := dd.TasksByState(StateCompleted)
+	if err != nil {
+		t.Fatalf("TasksByState completed: %v", err)
+	}
+	if len(completed) != 1 || completed[0].Name != "shipped" {
+		t.Errorf("completed tasks = %v", completed)
+	}
+
+	// Empty states return empty slice
+	merge, err := dd.TasksByState(StateMerge)
+	if err != nil {
+		t.Fatalf("TasksByState merge: %v", err)
+	}
+	if len(merge) != 0 {
+		t.Errorf("expected 0 merge tasks, got %d", len(merge))
+	}
+}
+
+func TestTasksByStateUnknown(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	_, err := dd.TasksByState("bogus")
+	if err == nil {
+		t.Fatal("expected error for unknown state")
+	}
+}
+
+func TestAllTasks(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	all, err := dd.AllTasks()
+	if err != nil {
+		t.Fatalf("AllTasks: %v", err)
+	}
+
+	// 3 pending + 1 review + 1 completed = 5
+	if len(all) != 5 {
+		t.Errorf("expected 5 total tasks, got %d", len(all))
+	}
+}
+
+func TestFindTask(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	// Find by plain name
+	task, err := dd.FindTask("add-auth")
+	if err != nil {
+		t.Fatalf("FindTask add-auth: %v", err)
+	}
+	if task.Name != "add-auth" {
+		t.Errorf("Name = %q", task.Name)
+	}
+	if task.Group != "" {
+		t.Errorf("Group = %q, want empty", task.Group)
+	}
+
+	// Find by group/name
+	task, err = dd.FindTask("backend/add-api")
+	if err != nil {
+		t.Fatalf("FindTask backend/add-api: %v", err)
+	}
+	if task.Name != "add-api" {
+		t.Errorf("Name = %q", task.Name)
+	}
+	if task.Group != "backend" {
+		t.Errorf("Group = %q", task.Group)
+	}
+}
+
+func TestFindTaskNotFound(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	_, err := dd.FindTask("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for missing task")
+	}
+}
+
+func TestTaskContent(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	task, _ := dd.FindTask("add-auth")
+	content, err := task.Content()
+	if err != nil {
+		t.Fatalf("Content: %v", err)
+	}
+	if content != "Add authentication." {
+		t.Errorf("Content = %q", content)
+	}
+}
+
+func TestBranchName(t *testing.T) {
+	tests := []struct {
+		name  string
+		group string
+		want  string
+	}{
+		{"add-auth", "", "hydra/add-auth"},
+		{"Add Auth", "", "hydra/add-auth"},
+		{"add-api", "backend", "hydra/backend/add-api"},
+		{"My Task", "Frontend", "hydra/frontend/my-task"},
+	}
+
+	for _, tt := range tests {
+		task := &Task{Name: tt.name, Group: tt.group}
+		got := task.BranchName()
+		if got != tt.want {
+			t.Errorf("BranchName(%q, group=%q) = %q, want %q", tt.name, tt.group, got, tt.want)
+		}
+	}
+}
+
+func TestMoveTask(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	task, _ := dd.FindTask("add-auth")
+	originalPath := task.FilePath
+
+	if err := dd.MoveTask(task, StateReview); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	// Original file should be gone
+	if _, err := os.Stat(originalPath); !os.IsNotExist(err) {
+		t.Error("original file still exists")
+	}
+
+	// Task should be at new location
+	if _, err := os.Stat(task.FilePath); err != nil {
+		t.Errorf("new file doesn't exist: %v", err)
+	}
+
+	if task.State != StateReview {
+		t.Errorf("State = %q, want review", task.State)
+	}
+
+	expectedDir := filepath.Join(dir, "state", "review")
+	if filepath.Dir(task.FilePath) != expectedDir {
+		t.Errorf("FilePath dir = %q, want %q", filepath.Dir(task.FilePath), expectedDir)
+	}
+}
+
+func TestMoveTaskAllStates(t *testing.T) {
+	for _, state := range []TaskState{StateReview, StateMerge, StateCompleted, StateAbandoned} {
+		t.Run(string(state), func(t *testing.T) {
+			dir := setupDesignDir(t)
+			dd, _ := NewDesignDir(dir)
+
+			task, _ := dd.FindTask("fix-bug")
+			if err := dd.MoveTask(task, state); err != nil {
+				t.Fatalf("MoveTask to %s: %v", state, err)
+			}
+			if task.State != state {
+				t.Errorf("State = %q, want %q", task.State, state)
+			}
+		})
+	}
+}
+
+func TestMoveTaskInvalidState(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDesignDir(dir)
+
+	task, _ := dd.FindTask("fix-bug")
+	err := dd.MoveTask(task, "bogus")
+	if err == nil {
+		t.Fatal("expected error for invalid state")
+	}
+}
+
+func TestNonMdFilesIgnored(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "tasks"), 0o755)
+	os.WriteFile(filepath.Join(dir, "tasks", "real-task.md"), []byte("task"), 0o644)
+	os.WriteFile(filepath.Join(dir, "tasks", "notes.txt"), []byte("not a task"), 0o644)
+	os.WriteFile(filepath.Join(dir, "tasks", ".hidden"), []byte("hidden"), 0o644)
+
+	dd, _ := NewDesignDir(dir)
+	tasks, err := dd.PendingTasks()
+	if err != nil {
+		t.Fatalf("PendingTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Name != "real-task" {
+		t.Errorf("Name = %q, want real-task", tasks[0].Name)
+	}
+}

@@ -9,10 +9,16 @@ import (
 	"github.com/erikh/hydra/internal/repo"
 )
 
+// ClaudeFunc is the function signature for invoking claude.
+// It receives the repo working directory and the assembled document.
+type ClaudeFunc func(repoDir, document string) error
+
 type Runner struct {
 	Config    *config.Config
 	DesignDir *design.DesignDir
 	Repo      *repo.Repo
+	Claude    ClaudeFunc
+	BaseDir   string // working directory for lock file; defaults to "."
 }
 
 func New(cfg *config.Config) (*Runner, error) {
@@ -25,11 +31,17 @@ func New(cfg *config.Config) (*Runner, error) {
 		Config:    cfg,
 		DesignDir: dd,
 		Repo:      repo.Open(cfg.RepoDir),
+		Claude:    invokeClaude,
+		BaseDir:   ".",
 	}, nil
 }
 
 func (r *Runner) Run(taskName string) error {
-	hydraDir := config.HydraPath(".")
+	baseDir := r.BaseDir
+	if baseDir == "" {
+		baseDir = "."
+	}
+	hydraDir := config.HydraPath(baseDir)
 
 	// Find the task
 	task, err := r.DesignDir.FindTask(taskName)
@@ -62,7 +74,11 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	// Invoke claude
-	if err := invokeClaude(r.Config.RepoDir, doc); err != nil {
+	claudeFn := r.Claude
+	if claudeFn == nil {
+		claudeFn = invokeClaude
+	}
+	if err := claudeFn(r.Config.RepoDir, doc); err != nil {
 		return err
 	}
 
