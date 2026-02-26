@@ -35,12 +35,13 @@ func BuildArgs(cfg CLIConfig) []string {
 		args = append(args, "--model", cfg.Model)
 	}
 
-	if cfg.AutoAccept {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-
-	if cfg.PlanMode {
-		args = append(args, "--plan")
+	switch {
+	case cfg.AutoAccept && cfg.PlanMode:
+		args = append(args, "--dangerously-skip-permissions", "--permission-mode", "plan")
+	case cfg.AutoAccept:
+		args = append(args, "--permission-mode", "bypassPermissions")
+	case cfg.PlanMode:
+		args = append(args, "--permission-mode", "plan")
 	}
 
 	// Positional argument: starts an interactive session with this prompt.

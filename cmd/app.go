@@ -390,12 +390,14 @@ func statusCommand() *cli.Command {
 				return err
 			}
 
-			// Show currently running tasks
+			// Show currently running tasks and collect their names.
+			runningSet := make(map[string]bool)
 			running, err := lock.ReadAll(config.HydraPath("."))
 			if err == nil && len(running) > 0 {
 				fmt.Println("Running:")
 				for _, rt := range running {
 					fmt.Printf("  - %s (PID %d)\n", rt.TaskName, rt.PID)
+					runningSet[rt.TaskName] = true
 				}
 				fmt.Println()
 			}
@@ -412,12 +414,25 @@ func statusCommand() *cli.Command {
 				if err != nil {
 					return err
 				}
-				if len(tasks) == 0 {
+
+				var filtered []design.Task
+				for _, t := range tasks {
+					label := t.Name
+					if t.Group != "" {
+						label = t.Group + "/" + t.Name
+					}
+					if state == design.StatePending && runningSet[label] {
+						continue
+					}
+					filtered = append(filtered, t)
+				}
+
+				if len(filtered) == 0 {
 					continue
 				}
 
 				fmt.Printf("%s:\n", state)
-				for _, t := range tasks {
+				for _, t := range filtered {
 					label := t.Name
 					if t.Group != "" {
 						label = t.Group + "/" + t.Name

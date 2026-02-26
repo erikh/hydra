@@ -25,7 +25,7 @@ func TestBuildArgs(t *testing.T) {
 				Prompt:   "hello world",
 				PlanMode: true,
 			},
-			want: []string{"--plan", "hello world"},
+			want: []string{"--permission-mode", "plan", "hello world"},
 		},
 		{
 			name: "with model",
@@ -34,7 +34,7 @@ func TestBuildArgs(t *testing.T) {
 				Model:    "claude-opus-4-6",
 				PlanMode: true,
 			},
-			want: []string{"--model", "claude-opus-4-6", "--plan", "do something"},
+			want: []string{"--model", "claude-opus-4-6", "--permission-mode", "plan", "do something"},
 		},
 		{
 			name: "auto accept only",
@@ -42,7 +42,7 @@ func TestBuildArgs(t *testing.T) {
 				Prompt:     "fix bug",
 				AutoAccept: true,
 			},
-			want: []string{"--dangerously-skip-permissions", "fix bug"},
+			want: []string{"--permission-mode", "bypassPermissions", "fix bug"},
 		},
 		{
 			name: "auto accept with plan",
@@ -51,7 +51,7 @@ func TestBuildArgs(t *testing.T) {
 				AutoAccept: true,
 				PlanMode:   true,
 			},
-			want: []string{"--dangerously-skip-permissions", "--plan", "fix bug"},
+			want: []string{"--dangerously-skip-permissions", "--permission-mode", "plan", "fix bug"},
 		},
 		{
 			name: "all options",
@@ -61,7 +61,7 @@ func TestBuildArgs(t *testing.T) {
 				AutoAccept: true,
 				PlanMode:   true,
 			},
-			want: []string{"--model", "claude-sonnet-4-6", "--dangerously-skip-permissions", "--plan", "implement feature"},
+			want: []string{"--model", "claude-sonnet-4-6", "--dangerously-skip-permissions", "--permission-mode", "plan", "implement feature"},
 		},
 	}
 
