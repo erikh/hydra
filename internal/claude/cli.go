@@ -26,8 +26,9 @@ func FindCLI() string {
 }
 
 // BuildArgs constructs the argument list for the claude CLI from the config.
+// The prompt is passed as a positional argument so claude runs interactively.
 func BuildArgs(cfg CLIConfig) []string {
-	args := []string{"-p", cfg.Prompt}
+	var args []string
 
 	if cfg.Model != "" {
 		args = append(args, "--model", cfg.Model)
@@ -36,6 +37,9 @@ func BuildArgs(cfg CLIConfig) []string {
 	if cfg.AutoAccept {
 		args = append(args, "--dangerously-skip-permissions")
 	}
+
+	// Positional argument: starts an interactive session with this prompt.
+	args = append(args, cfg.Prompt)
 
 	return args
 }

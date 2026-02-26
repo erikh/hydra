@@ -24,7 +24,7 @@ func TestBuildArgs(t *testing.T) {
 			cfg: CLIConfig{
 				Prompt: "hello world",
 			},
-			want: []string{"-p", "hello world"},
+			want: []string{"hello world"},
 		},
 		{
 			name: "with model",
@@ -32,7 +32,7 @@ func TestBuildArgs(t *testing.T) {
 				Prompt: "do something",
 				Model:  "claude-opus-4-6",
 			},
-			want: []string{"-p", "do something", "--model", "claude-opus-4-6"},
+			want: []string{"--model", "claude-opus-4-6", "do something"},
 		},
 		{
 			name: "with auto accept",
@@ -40,7 +40,7 @@ func TestBuildArgs(t *testing.T) {
 				Prompt:     "fix bug",
 				AutoAccept: true,
 			},
-			want: []string{"-p", "fix bug", "--dangerously-skip-permissions"},
+			want: []string{"--dangerously-skip-permissions", "fix bug"},
 		},
 		{
 			name: "all options",
@@ -49,7 +49,7 @@ func TestBuildArgs(t *testing.T) {
 				Model:      "claude-sonnet-4-6",
 				AutoAccept: true,
 			},
-			want: []string{"-p", "implement feature", "--model", "claude-sonnet-4-6", "--dangerously-skip-permissions"},
+			want: []string{"--model", "claude-sonnet-4-6", "--dangerously-skip-permissions", "implement feature"},
 		},
 	}
 
