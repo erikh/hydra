@@ -2,14 +2,20 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/formatters"
+	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
 	"github.com/erikh/hydra/internal/issues"
@@ -17,7 +23,10 @@ import (
 	"github.com/erikh/hydra/internal/repo"
 	"github.com/erikh/hydra/internal/runner"
 	"github.com/erikh/hydra/internal/taskrun"
+	"github.com/erikh/hydra/internal/tui"
+	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
+	"go.yaml.in/yaml/v4"
 )
 
 // NewApp creates the hydra CLI application.
@@ -379,13 +388,49 @@ func runGroupCommand() *cli.Command {
 	}
 }
 
+type statusRunning struct {
+	Action string `json:"action" yaml:"action"`
+	PID    int    `json:"pid" yaml:"pid"`
+}
+
+type statusOutput struct {
+	Running   map[string]statusRunning `json:"running,omitempty" yaml:"running,omitempty"`
+	Pending   []string                 `json:"pending,omitempty" yaml:"pending,omitempty"`
+	Review    []string                 `json:"review,omitempty" yaml:"review,omitempty"`
+	Merge     []string                 `json:"merge,omitempty" yaml:"merge,omitempty"`
+	Completed []string                 `json:"completed,omitempty" yaml:"completed,omitempty"`
+	Abandoned []string                 `json:"abandoned,omitempty" yaml:"abandoned,omitempty"`
+}
+
 func statusCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "status",
-		Usage: "Show task states and current running task",
-		Description: "Displays tasks grouped by state (pending, review, merge, completed, abandoned) " +
-			"and shows any currently running task with its PID.",
-		Action: func(_ *cli.Context) error {
+		Usage: "Show task states and running tasks as YAML (or JSON with -j)",
+		Description: "Outputs a structured document with tasks grouped by state " +
+			"(running, pending, review, merge, completed, abandoned). " +
+			"Running tasks are keyed by name with 'action' and 'pid' fields. " +
+			"Default format is YAML; pass -j/--json for JSON.\n\n" +
+			"Example YAML output:\n\n" +
+			"  running:\n" +
+			"    my-task:\n" +
+			"      action: reviewing\n" +
+			"      pid: 12345\n" +
+			"  pending:\n" +
+			"    - other-task\n" +
+			"  review:\n" +
+			"    - done-task",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "json",
+				Aliases: []string{"j"},
+				Usage:   "Output as JSON instead of YAML",
+			},
+			&cli.BoolFlag{
+				Name:  "no-color",
+				Usage: "Disable syntax highlighting",
+			},
+		},
+		Action: func(c *cli.Context) error {
 			cfg, err := config.Discover()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
@@ -396,59 +441,82 @@ func statusCommand() *cli.Command {
 				return err
 			}
 
-			// Show currently running tasks and collect their names.
+			var out statusOutput
+
+			// Collect running tasks.
 			runningSet := make(map[string]bool)
 			running, err := lock.ReadAll(config.HydraPath("."))
 			if err == nil && len(running) > 0 {
-				fmt.Println("Running:")
+				out.Running = make(map[string]statusRunning, len(running))
 				for _, rt := range running {
-					fmt.Printf("  - %s (PID %d)\n", rt.TaskName, rt.PID)
+					action, name := parseRunningTask(rt.TaskName)
+					out.Running[name] = statusRunning{
+						Action: action,
+						PID:    rt.PID,
+					}
 					runningSet[rt.TaskName] = true
 				}
-				fmt.Println()
 			}
 
-			// Show tasks by state
-			for _, state := range []design.TaskState{
-				design.StatePending,
-				design.StateReview,
-				design.StateMerge,
-				design.StateCompleted,
-				design.StateAbandoned,
-			} {
-				tasks, err := dd.TasksByState(state)
+			// Collect tasks by state.
+			stateSlices := []struct {
+				state design.TaskState
+				dest  *[]string
+			}{
+				{design.StatePending, &out.Pending},
+				{design.StateReview, &out.Review},
+				{design.StateMerge, &out.Merge},
+				{design.StateCompleted, &out.Completed},
+				{design.StateAbandoned, &out.Abandoned},
+			}
+			for _, ss := range stateSlices {
+				tasks, err := dd.TasksByState(ss.state)
 				if err != nil {
 					return err
 				}
-
-				var filtered []design.Task
 				for _, t := range tasks {
 					label := t.Name
 					if t.Group != "" {
 						label = t.Group + "/" + t.Name
 					}
-					if state == design.StatePending && runningSet[label] {
+					if ss.state == design.StatePending && runningSet[label] {
 						continue
 					}
-					filtered = append(filtered, t)
+					*ss.dest = append(*ss.dest, label)
 				}
-
-				if len(filtered) == 0 {
-					continue
-				}
-
-				fmt.Printf("%s:\n", state)
-				for _, t := range filtered {
-					label := t.Name
-					if t.Group != "" {
-						label = t.Group + "/" + t.Name
-					}
-					fmt.Printf("  - %s\n", label)
-				}
-				fmt.Println()
 			}
 
-			return nil
+			var buf bytes.Buffer
+			lang := "yaml"
+			if c.Bool("json") {
+				lang = "json"
+				enc := json.NewEncoder(&buf)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(out); err != nil {
+					return err
+				}
+			} else {
+				if err := yaml.NewEncoder(&buf).Encode(out); err != nil {
+					return err
+				}
+			}
+
+			if !c.Bool("no-color") && isatty.IsTerminal(os.Stdout.Fd()) {
+				lexer := lexers.Get(lang)
+				if lexer == nil {
+					lexer = lexers.Fallback
+				}
+				lexer = chroma.Coalesce(lexer)
+				formatter := formatters.Get("terminal256")
+				style := tui.LoadTheme().ChromaStyle()
+				iterator, err := lexer.Tokenise(nil, buf.String())
+				if err != nil {
+					return err
+				}
+				return formatter.Format(os.Stdout, style, iterator)
+			}
+			_, err = buf.WriteTo(os.Stdout)
+			return err
 		},
 	}
 }
@@ -899,6 +967,23 @@ func mergeCommand() *cli.Command {
 			run:  (*runner.Runner).Merge,
 		},
 	)
+}
+
+// parseRunningTask splits a raw lock name like "review:foo" into
+// a display state ("reviewing") and the task name ("foo").
+func parseRunningTask(name string) (state, task string) {
+	labels := map[string]string{
+		"review": "reviewing",
+		"merge":  "merging",
+		"test":   "testing",
+	}
+
+	if prefix, rest, ok := strings.Cut(name, ":"); ok {
+		if label, found := labels[prefix]; found {
+			return label, rest
+		}
+	}
+	return "running", name
 }
 
 func milestoneCommand() *cli.Command {

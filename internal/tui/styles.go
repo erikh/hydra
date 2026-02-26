@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -139,4 +140,39 @@ func (t Theme) DiffRemoveStyle() lipgloss.Style {
 // DiffHeaderStyle returns a style for diff headers.
 func (t Theme) DiffHeaderStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+}
+
+// ChromaStyle returns a chroma syntax-highlighting style derived from the theme.
+func (t Theme) ChromaStyle() *chroma.Style {
+	bg := string(t.Bg)
+	fg := string(t.Fg)
+	accent := string(t.Accent)
+	success := string(t.Success)
+	errColor := string(t.Error)
+	warning := string(t.Warning)
+	muted := string(t.Muted)
+	highlight := string(t.Highlight)
+
+	return chroma.MustNewStyle("hydra", chroma.StyleEntries{
+		chroma.Background:         fg + " bg:" + bg,
+		chroma.Text:               fg,
+		chroma.Keyword:            errColor + " bold",
+		chroma.KeywordNamespace:   errColor,
+		chroma.Name:               fg,
+		chroma.NameTag:            accent + " bold",
+		chroma.NameAttribute:      success,
+		chroma.NameBuiltin:        accent,
+		chroma.LiteralString:      success,
+		chroma.LiteralStringOther: success,
+		chroma.LiteralNumber:      highlight,
+		chroma.Literal:            warning,
+		chroma.LiteralDate:        warning,
+		chroma.Operator:           errColor,
+		chroma.Punctuation:        fg,
+		chroma.Comment:            muted + " italic",
+		chroma.GenericHeading:     accent + " bold",
+		chroma.GenericSubheading:  accent,
+		chroma.GenericStrong:      "bold",
+		chroma.GenericEmph:        "italic",
+	})
 }
