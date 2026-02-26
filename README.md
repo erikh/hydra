@@ -6,7 +6,7 @@ AI-driven local pull request workflow where Claude is the only contributor.
 
 ## What is Hydra?
 
-You don't need a CI system. You don't need VM infrastructure. You don't need web interfaces. You don't even need pull requests. You don't even need to push to do anything. You just need Claude.
+You don't need a CI system, VM infrastructure, web interfaces, pull requests. You don't even need to push to do anything. You just need Claude.
 
 Hydra turns markdown documents that describe desired changes into branches, code, and commits without you writing a line. Each task is just a markdown file describing what to build or fix. Hydra assembles context from your design docs, hands the full document to Claude Code — including instructions to run tests, lint, and commit — and pushes a branch ready for your review.
 
