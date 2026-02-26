@@ -59,14 +59,33 @@ func (r *Runner) Merge(taskName string) error {
 		return fmt.Errorf("checking out branch: %w", err)
 	}
 
-	// Rebase loop: repeat until task branch is on top of origin/main.
-	if err := r.rebaseLoop(task, taskRepo); err != nil {
+	// Attempt rebase onto origin/main; collect conflict info if any.
+	conflictFiles, err := r.attemptRebase(taskRepo)
+	if err != nil {
 		return err
 	}
 
-	// Pre-merge verification: double-check commit messages, tests, and lint.
-	if err := r.preMergeChecks(task, taskRepo); err != nil {
-		return err
+	// Assemble single comprehensive document and invoke Claude once.
+	content, _ := task.Content()
+	cmds := r.commandsMap(wd)
+	sign := taskRepo.HasSigningKey()
+	doc := assembleMergeDocument(content, conflictFiles, cmds, sign)
+
+	claudeFn := r.Claude
+	if claudeFn == nil {
+		claudeFn = invokeClaude
+	}
+	_ = claudeFn(context.Background(), ClaudeRunConfig{
+		RepoDir:    taskRepo.Dir,
+		Document:   doc,
+		Model:      r.Model,
+		AutoAccept: r.AutoAccept,
+		PlanMode:   r.PlanMode,
+	})
+
+	// Force-push the branch (Claude may have added commits).
+	if err := taskRepo.ForcePushWithLease(branch); err != nil {
+		return fmt.Errorf("pushing branch: %w", err)
 	}
 
 	// Rebase task branch into main and push.
@@ -92,200 +111,81 @@ func (r *Runner) findMergeTask(taskName string) (*design.Task, error) {
 	return task, nil
 }
 
-// rebaseLoop rebases the task branch onto origin/main, resolving conflicts
-// and fixing test failures as needed. Returns when the branch is up-to-date.
-func (r *Runner) rebaseLoop(task *design.Task, taskRepo *repo.Repo) error {
-	for {
-		if err := taskRepo.Fetch(); err != nil {
-			return fmt.Errorf("fetching: %w", err)
-		}
-
-		defaultBranch, err := r.detectDefaultBranch(taskRepo)
-		if err != nil {
-			return fmt.Errorf("detecting default branch: %w", err)
-		}
-		originRef := "origin/" + defaultBranch
-
-		if taskRepo.IsAncestor(originRef, "HEAD") {
-			return nil
-		}
-
-		if err := r.rebaseOnto(task, taskRepo, originRef); err != nil {
-			return err
-		}
-
-		if err := r.runPostRebaseChecks(task, taskRepo); err != nil {
-			return err
-		}
+// attemptRebase fetches, detects the default branch, and attempts to rebase
+// onto origin/<default>. If the rebase has conflicts, it aborts the rebase and
+// returns the list of conflicted files. On success, returns an empty list.
+func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
+	if err := taskRepo.Fetch(); err != nil {
+		return nil, fmt.Errorf("fetching: %w", err)
 	}
-}
 
-// rebaseOnto attempts a rebase and handles conflicts via Claude.
-func (r *Runner) rebaseOnto(task *design.Task, taskRepo *repo.Repo, originRef string) error {
+	defaultBranch, err := r.detectDefaultBranch(taskRepo)
+	if err != nil {
+		return nil, fmt.Errorf("detecting default branch: %w", err)
+	}
+	originRef := "origin/" + defaultBranch
+
+	// Already up-to-date.
+	if taskRepo.IsAncestor(originRef, "HEAD") {
+		return nil, nil
+	}
+
+	// Try the rebase.
 	if err := taskRepo.Rebase(originRef); err == nil {
-		return nil
+		return nil, nil
 	}
 
-	// Rebase failed — likely conflicts. Open TUI for Claude to resolve.
+	// Rebase failed — collect conflict files and abort.
 	conflictFiles, _ := taskRepo.ConflictFiles()
-	content, _ := task.Content()
-	logOutput, _ := taskRepo.Log(10)
-
-	doc := r.assembleConflictDocument(content, conflictFiles, logOutput)
-	if err := r.invokeClaudeForRepo(taskRepo.Dir, doc); err != nil {
-		_ = taskRepo.RebaseAbort()
-		return fmt.Errorf("conflict resolution failed: %w", err)
-	}
-
-	if err := taskRepo.AddAll(); err != nil {
-		_ = taskRepo.RebaseAbort()
-		return fmt.Errorf("staging resolved files: %w", err)
-	}
-	if err := taskRepo.RebaseContinue(); err != nil {
-		_ = taskRepo.RebaseAbort()
-		return fmt.Errorf("rebase continue failed: %w", err)
-	}
-	return nil
+	_ = taskRepo.RebaseAbort()
+	return conflictFiles, nil
 }
 
-// runPostRebaseChecks runs test and lint after a successful rebase,
-// invoking Claude to fix test failures if needed.
-func (r *Runner) runPostRebaseChecks(task *design.Task, taskRepo *repo.Repo) error {
-	if r.TaskRunner == nil {
-		return nil
-	}
-
-	if err := r.TaskRunner.Run("test", taskRepo.Dir); err != nil {
-		if fixErr := r.fixTestFailures(task, taskRepo, err.Error()); fixErr != nil {
-			return fixErr
-		}
-	}
-	if err := r.TaskRunner.Run("lint", taskRepo.Dir); err != nil {
-		return fmt.Errorf("lint failed after rebase: %w", err)
-	}
-	return nil
-}
-
-// fixTestFailures opens a Claude TUI to fix test failures, then commits fixes.
-func (r *Runner) fixTestFailures(task *design.Task, taskRepo *repo.Repo, testError string) error {
-	content, _ := task.Content()
-	cmds := r.commandsMap(taskRepo.Dir)
-	doc := assembleTestFixDocument(content, testError, cmds)
-
-	// Append commit instructions without test commands (the point is to fix failures).
-	sign := taskRepo.HasSigningKey()
-	doc += commitInstructions(sign, nil)
-
-	// Capture HEAD before invoking Claude.
-	beforeSHA, _ := taskRepo.LastCommitSHA()
-
-	claudeErr := r.invokeClaudeForRepo(taskRepo.Dir, doc)
-
-	// Check if Claude committed, even if Claude returned an error
-	// (e.g. terminated by signal after committing).
-	afterSHA, _ := taskRepo.LastCommitSHA()
-	if afterSHA != beforeSHA {
-		return nil
-	}
-	if claudeErr != nil {
-		return fmt.Errorf("test fix failed: %w", claudeErr)
-	}
-
-	// Fallback: if Claude didn't commit, commit any changes ourselves.
-	hasChanges, _ := taskRepo.HasChanges()
-	if !hasChanges {
-		return nil
-	}
-
-	if err := taskRepo.AddAll(); err != nil {
-		return fmt.Errorf("staging test fixes: %w", err)
-	}
-	if err := taskRepo.Commit("hydra: fix tests after rebase", sign); err != nil {
-		return fmt.Errorf("committing test fixes: %w", err)
-	}
-	return nil
-}
-
-// invokeClaudeForRepo invokes the Claude function with the given repo dir and document.
-func (r *Runner) invokeClaudeForRepo(repoDir, document string) error {
-	claudeFn := r.Claude
-	if claudeFn == nil {
-		claudeFn = invokeClaude
-	}
-	return claudeFn(context.Background(), ClaudeRunConfig{
-		RepoDir:    repoDir,
-		Document:   document,
-		Model:      r.Model,
-		AutoAccept: r.AutoAccept,
-		PlanMode:   r.PlanMode,
-	})
-}
-
-// preMergeChecks invokes Claude to verify commit messages, test coverage, and lint
-// before merging into the default branch.
-func (r *Runner) preMergeChecks(task *design.Task, taskRepo *repo.Repo) error {
-	content, _ := task.Content()
-	cmds := r.commandsMap(taskRepo.Dir)
-	doc := assemblePreMergeDocument(content, cmds)
-
-	sign := taskRepo.HasSigningKey()
-	doc += commitInstructions(sign, cmds)
-
-	beforeSHA, _ := taskRepo.LastCommitSHA()
-
-	claudeErr := r.invokeClaudeForRepo(taskRepo.Dir, doc)
-
-	// If Claude committed fixes, push them even if Claude returned an error
-	// (e.g. terminated by signal after committing).
-	afterSHA, _ := taskRepo.LastCommitSHA()
-	if afterSHA == beforeSHA && claudeErr != nil {
-		return fmt.Errorf("pre-merge checks failed: %w", claudeErr)
-	}
-	if afterSHA != beforeSHA {
-		branch := task.BranchName()
-		if err := taskRepo.ForcePushWithLease(branch); err != nil {
-			return fmt.Errorf("pushing pre-merge fixes: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// assemblePreMergeDocument builds a document for pre-merge verification.
-func assemblePreMergeDocument(taskContent string, cmds map[string]string) string {
+// assembleMergeDocument builds a single comprehensive document for the merge
+// workflow. It covers conflict resolution (if needed), test/lint verification,
+// commit message validation, and test coverage — all in one Claude session.
+func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool) string {
 	var b strings.Builder
-	b.WriteString("# Pre-Merge Verification\n\n")
-	b.WriteString("This branch is about to be merged into the default branch. " +
-		"Perform a final verification before merge.\n\n")
+
+	b.WriteString("# Merge Workflow\n\n")
+	b.WriteString("This branch is being merged into the default branch. " +
+		"Complete all steps below in order.\n\n")
 
 	b.WriteString("## Task Document\n\n")
 	b.WriteString(taskContent)
 	b.WriteString("\n\n")
 
-	b.WriteString("## Checks to Perform\n\n")
+	// Conflict resolution section (only if there are conflicts).
+	if len(conflictFiles) > 0 {
+		b.WriteString("## Conflict Resolution\n\n")
+		b.WriteString("A rebase onto origin/main was attempted but resulted in conflicts. " +
+			"The rebase has been aborted. You must:\n\n")
+		b.WriteString("1. Run `git rebase origin/main`\n")
+		b.WriteString("2. Resolve the conflicts in the files listed below\n")
+		b.WriteString("3. Stage resolved files with `git add`\n")
+		b.WriteString("4. Run `git rebase --continue`\n\n")
 
-	b.WriteString("### 1. Commit Message Validation\n\n")
+		b.WriteString("### Conflicted Files\n\n")
+		for _, f := range conflictFiles {
+			b.WriteString("- ")
+			b.WriteString(f)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## Commit Message Validation\n\n")
 	b.WriteString("Read the git log for this branch. Verify that the commit message(s) " +
 		"accurately describe the changes made according to the task document above. " +
 		"If any commit message is vague, misleading, or does not reflect the actual changes, " +
 		"amend the most recent commit with a corrected message.\n\n")
 
-	b.WriteString("### 2. Test Coverage\n\n")
+	b.WriteString("## Test Coverage\n\n")
 	b.WriteString("Verify that every feature, behavior, or change described in the task document " +
 		"has corresponding test coverage. If any requirement lacks tests, add the missing tests.\n\n")
 
-	b.WriteString("### 3. Lint and Tests\n\n")
-	b.WriteString("The commands below are the project's official test and lint commands from hydra.yml. " +
-		"Do not run other commands to perform testing or linting. " +
-		"Only run the exact commands listed below, fix any issues they report, and repeat until they pass.\n\n")
-	if lintCmd, ok := cmds["lint"]; ok {
-		b.WriteString(fmt.Sprintf("- Run the linter: `%s`\n", lintCmd))
-	}
-	if testCmd, ok := cmds["test"]; ok {
-		b.WriteString(fmt.Sprintf("- Run the test suite: `%s`\n", testCmd))
-	}
-
-	b.WriteString("\nIf everything passes and no changes are needed, do not create a commit.\n")
+	b.WriteString(verificationSection(cmds))
+	b.WriteString(commitInstructions(sign, cmds))
 
 	return b.String()
 }
@@ -351,55 +251,6 @@ func (r *Runner) detectDefaultBranch(taskRepo interface{ BranchExists(string) bo
 		return "master", nil
 	}
 	return "", errors.New("cannot detect default branch (neither main nor master found)")
-}
-
-// assembleConflictDocument builds a document for conflict resolution.
-func (r *Runner) assembleConflictDocument(taskContent string, conflictFiles []string, recentLog string) string {
-	var b strings.Builder
-	b.WriteString("# Conflict Resolution\n\n")
-	b.WriteString("A rebase onto origin/main has resulted in merge conflicts. " +
-		"Please resolve all conflicts in the files listed below.\n\n")
-
-	if len(conflictFiles) > 0 {
-		b.WriteString("## Conflicted Files\n\n")
-		for _, f := range conflictFiles {
-			b.WriteString("- ")
-			b.WriteString(f)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-
-	b.WriteString("## Task Context\n\n")
-	b.WriteString(taskContent)
-	b.WriteString("\n\n")
-
-	if recentLog != "" {
-		b.WriteString("## Recent Commits on origin/main\n\n```\n")
-		b.WriteString(recentLog)
-		b.WriteString("\n```\n\n")
-	}
-
-	b.WriteString("After resolving conflicts, stage the resolved files with `git add`.\n")
-	return b.String()
-}
-
-// assembleTestFixDocument builds a document for fixing test failures after rebase.
-func assembleTestFixDocument(taskContent string, testError string, cmds map[string]string) string {
-	doc := "# Fix Test Failures\n\n"
-	doc += "Tests failed after rebasing onto origin/main. " +
-		"Please fix the test failures.\n\n"
-	doc += "## Error Output\n\n```\n" + testError + "\n```\n\n"
-	doc += "## Task Context\n\n" + taskContent + "\n"
-
-	if testCmd, ok := cmds["test"]; ok {
-		doc += "\nThe command below is the project's official test command from hydra.yml. " +
-			"Do not run other commands to perform testing. " +
-			"Only run the exact command listed below, fix any issues it reports, and repeat until it passes.\n"
-		doc += fmt.Sprintf("\nRun tests with: `%s`\n", testCmd)
-	}
-
-	return doc
 }
 
 // closeIssueIfNeeded closes the remote issue if the task is an issue task.

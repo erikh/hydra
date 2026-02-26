@@ -1091,10 +1091,20 @@ func TestMergeWorkflow(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Merge the task.
-	r.Claude = mockClaudeNoChanges // no conflicts expected
+	// Track Claude invocations during merge.
+	mergeCallCount := 0
+	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error {
+		mergeCallCount++
+		return nil
+	}
+
 	if err := r.Merge("add-feature"); err != nil {
 		t.Fatalf("Merge: %v", err)
+	}
+
+	// Merge should invoke Claude exactly once.
+	if mergeCallCount != 1 {
+		t.Errorf("expected 1 Claude invocation during merge, got %d", mergeCallCount)
 	}
 
 	// Task should be in completed state.
@@ -1121,7 +1131,7 @@ func TestMergeUsesRebase(t *testing.T) {
 	}
 
 	// Merge the task.
-	r.Claude = mockClaudeNoChanges
+	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
 	if err := r.Merge("add-feature"); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -1157,7 +1167,7 @@ func TestMergeFromReviewState(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	r.Claude = mockClaudeNoChanges
+	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
 	if err := r.Merge("add-feature"); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -1283,15 +1293,15 @@ func TestVerificationSectionExclusiveCommands(t *testing.T) {
 	}
 }
 
-func TestPreMergeDocumentExclusiveCommands(t *testing.T) {
+func TestMergeDocumentExclusiveCommands(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
-	result := assemblePreMergeDocument("Task content", cmds)
+	result := assembleMergeDocument("Task content", nil, cmds, false)
 
 	if !strings.Contains(result, "Do not run other commands") {
-		t.Error("missing exclusive commands directive in pre-merge document")
+		t.Error("missing exclusive commands directive in merge document")
 	}
 	if !strings.Contains(result, "listed below") {
 		t.Error("directive should reference commands listed below")
@@ -1307,20 +1317,6 @@ func TestTestDocumentExclusiveCommands(t *testing.T) {
 
 	if !strings.Contains(result, "Do not run other commands") {
 		t.Error("missing exclusive commands directive in test document")
-	}
-	if !strings.Contains(result, "listed below") {
-		t.Error("directive should reference commands listed below")
-	}
-}
-
-func TestTestFixDocumentExclusiveCommands(t *testing.T) {
-	cmds := map[string]string{
-		"test": "go test ./...",
-	}
-	result := assembleTestFixDocument("Task content", "test failure output", cmds)
-
-	if !strings.Contains(result, "Do not run other commands") {
-		t.Error("missing exclusive commands directive in test fix document")
 	}
 	if !strings.Contains(result, "listed below") {
 		t.Error("directive should reference commands listed below")
@@ -1595,7 +1591,7 @@ func TestReviewCommitsAndPushes(t *testing.T) {
 	}
 }
 
-func TestMergeInvokesPreMergeChecks(t *testing.T) {
+func TestMergeDocumentContents(t *testing.T) {
 	env := setupTestEnv(t)
 
 	r, err := New(env.Config)
@@ -1610,10 +1606,10 @@ func TestMergeInvokesPreMergeChecks(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Track Claude invocations during merge.
-	var docs []string
+	// Capture the single document passed to Claude during merge.
+	var captured string
 	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
-		docs = append(docs, cfg.Document)
+		captured = cfg.Document
 		return nil
 	}
 
@@ -1621,29 +1617,23 @@ func TestMergeInvokesPreMergeChecks(t *testing.T) {
 		t.Fatalf("Merge: %v", err)
 	}
 
-	// Find the pre-merge verification document.
-	preMergeDoc := ""
-	for _, doc := range docs {
-		if strings.Contains(doc, "Pre-Merge Verification") {
-			preMergeDoc = doc
-			break
-		}
-	}
-	if preMergeDoc == "" {
-		t.Fatal("merge did not invoke pre-merge checks")
-	}
-
-	// Verify it contains all check sections.
+	// Verify the single document contains all expected sections.
 	for _, want := range []string{
+		"Merge Workflow",
+		"Task Document",
 		"Commit Message Validation",
 		"Test Coverage",
-		"Lint",
-		"Tests",
+		"Commit Instructions",
 		"Add the feature.",
 	} {
-		if !strings.Contains(preMergeDoc, want) {
-			t.Errorf("pre-merge doc missing %q", want)
+		if !strings.Contains(captured, want) {
+			t.Errorf("merge document missing %q", want)
 		}
+	}
+
+	// No conflicts expected, so no conflict section.
+	if strings.Contains(captured, "Conflict Resolution") {
+		t.Error("merge document should not contain Conflict Resolution when no conflicts exist")
 	}
 }
 
@@ -2172,5 +2162,43 @@ func TestReviewDevContextCancellation(t *testing.T) {
 	// Should return nil (friendly message printed instead of error).
 	if err = r.ReviewDev(ctx, "add-feature"); err != nil {
 		t.Fatalf("ReviewDev should return nil on cancellation, got: %v", err)
+	}
+}
+
+func TestMergeDocumentWithConflicts(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	}
+	conflictFiles := []string{"main.go", "config.go"}
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false)
+
+	// Verify conflict section is present.
+	if !strings.Contains(result, "Conflict Resolution") {
+		t.Error("merge document missing Conflict Resolution section")
+	}
+	if !strings.Contains(result, "main.go") {
+		t.Error("merge document missing conflict file main.go")
+	}
+	if !strings.Contains(result, "config.go") {
+		t.Error("merge document missing conflict file config.go")
+	}
+	if !strings.Contains(result, "git rebase origin/main") {
+		t.Error("merge document missing rebase instruction")
+	}
+	if !strings.Contains(result, "git rebase --continue") {
+		t.Error("merge document missing rebase --continue instruction")
+	}
+
+	// Verify other sections are still present.
+	for _, want := range []string{
+		"Task Document",
+		"Commit Message Validation",
+		"Test Coverage",
+		"Commit Instructions",
+	} {
+		if !strings.Contains(result, want) {
+			t.Errorf("merge document with conflicts missing %q", want)
+		}
 	}
 }
