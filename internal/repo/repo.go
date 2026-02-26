@@ -32,6 +32,7 @@ func Open(dir string) *Repo {
 func (r *Repo) run(args ...string) (string, error) {
 	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = r.Dir
+	cmd.Env = append(os.Environ(), "GIT_EDITOR=true")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w\n%s", args[0], err, out)
