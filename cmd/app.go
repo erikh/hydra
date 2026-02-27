@@ -44,6 +44,7 @@ func NewApp() *cli.App {
 			if c.Args().First() != "completion" {
 				promptCompletionInstall()
 			}
+			setTerminalTitle(c)
 			return nil
 		},
 		Commands: []*cli.Command{
@@ -1135,6 +1136,20 @@ func verifyCommand() *cli.Command {
 			return r.Verify()
 		},
 	}
+}
+
+// setTerminalTitle sets the xterm window title to a compact summary
+// including the operation, task name, and PID.
+func setTerminalTitle(c *cli.Context) {
+	if !isatty.IsTerminal(os.Stderr.Fd()) {
+		return
+	}
+	args := c.Args().Slice()
+	if len(args) == 0 {
+		return
+	}
+	title := fmt.Sprintf("hydra %s [pid:%d]", strings.Join(args, " "), os.Getpid())
+	fmt.Fprintf(os.Stderr, "\033]0;%s\007", title)
 }
 
 // parseRunningTask splits a raw lock name like "review:foo" into

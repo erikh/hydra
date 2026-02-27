@@ -60,6 +60,7 @@ func RunCLI(ctx context.Context, cfg CLIConfig) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1")
 
 	return cmd.Run()
 }
