@@ -56,6 +56,7 @@ func TestScaffoldCreatesStructure(t *testing.T) {
 		filepath.Join("state", "completed"),
 		filepath.Join("state", "abandoned"),
 		filepath.Join("milestone", "history"),
+		filepath.Join("milestone", "delivered"),
 	} {
 		info, err := os.Stat(filepath.Join(dir, d))
 		if err != nil {
