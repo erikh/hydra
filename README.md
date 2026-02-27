@@ -350,6 +350,21 @@ hydra milestone deliver <date>        # Mark a milestone as delivered
 
 `hydra milestone repair` re-scans the milestone file and creates task files for any promises that don't have one yet. Existing tasks are left untouched.
 
+### `hydra notify`
+
+Sends a desktop notification. Used by Claude during task runs to alert the user when input is needed.
+
+```sh
+hydra notify "Build failed, need guidance on test approach"
+hydra notify -t "add-feature" "Rebase conflict in main.go — which side should I keep?"
+```
+
+**Flags:**
+
+- `--title` / `-t` — Notification title (defaults to "hydra")
+
+Uses D-Bus on Linux and Notification Center on macOS. If a `notify` field is set in `hydra.yml`, that command is executed instead (see [hydra.yml](#hydrayml)).
+
 ### `hydra completion`
 
 Print or manage shell tab completion.
@@ -382,6 +397,11 @@ gitea_url: https://gitea.example.com
 # if running low on time.
 timeout: "1h"
 
+# Custom notification command. When set, `hydra notify` executes this
+# command with title and message as arguments instead of using the
+# built-in D-Bus/macOS notification.
+notify: "my-notify-script"
+
 # Commands that Claude runs before committing.
 #
 # IMPORTANT: These commands may run concurrently across multiple hydra tasks,
@@ -398,6 +418,8 @@ commands:
   lint: "golangci-lint run ./..."
 ```
 
+**`notify`** — An optional custom notification command. When set, `hydra notify` runs this command with the title and message as shell-quoted arguments (e.g., `my-notify-script 'hydra' 'Build failed'`) instead of using the built-in D-Bus (Linux) or Notification Center (macOS) integration.
+
 **`timeout`** — An optional duration string (using Go duration syntax, e.g. `"30m"`, `"2h"`, `"1h30m"`) that sets a time limit for Claude sessions. When configured, Claude is instructed to commit any partial progress and stop gracefully if it is running low on time, rather than being killed mid-task.
 
 **Command keys:**
@@ -413,6 +435,8 @@ commands:
 **Makefile fallback:** If a command key is not configured in `hydra.yml`, hydra checks for a `Makefile` in the task's work directory. If a matching make target exists (e.g. `before:`, `clean:`, `test:`, `lint:`, `dev:`), hydra runs `make <name>` as a fallback. This means projects with a standard Makefile work out of the box without any `hydra.yml` configuration.
 
 **Concurrency safety:** Hydra runs each task in its own cloned work directory under `work/`. Multiple tasks can run concurrently, so your test and lint commands must be safe to execute in parallel. Avoid hardcoded ports, shared temp directories, global lock files, or anything else that would collide when two instances run at the same time. Each command should operate entirely within the current working tree.
+
+**Dirty working tree tolerance:** If a work directory has uncommitted changes (e.g., from a previously interrupted Claude session), hydra skips branch checkout and rebase operations and lets Claude continue working on the tree as-is. This prevents aborting a run due to leftover changes and allows Claude to pick up where it left off.
 
 ## How Claude Commits
 
