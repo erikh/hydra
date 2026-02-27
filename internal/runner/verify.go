@@ -98,15 +98,17 @@ func assembleVerifyDocument(functional string, cmds map[string]string) string {
 	b.WriteString("For each requirement in the specification above:\n")
 	b.WriteString("1. Find the relevant code that implements it\n")
 	b.WriteString("2. Confirm the implementation matches the specification\n")
-	b.WriteString("3. Run the test suite to verify tests pass\n\n")
+	b.WriteString("3. Verify that the requirement has adequate test coverage — there should be tests that exercise the described behavior, including edge cases and error paths\n")
+	b.WriteString("4. Run the test suite to verify tests pass\n\n")
 
 	b.WriteString(verificationSection(cmds))
 
-	b.WriteString("\nIf ALL requirements are satisfied and all tests pass, create a file called " +
-		"`verify-passed.txt` containing \"PASS\" and nothing else.\n\n")
+	b.WriteString("\nIf ALL requirements are satisfied, all have adequate test coverage, and all tests pass, " +
+		"create a file called `verify-passed.txt` containing \"PASS\" and nothing else.\n\n")
 
-	b.WriteString("If ANY requirement is NOT satisfied, create a file called `verify-failed.txt` " +
-		"listing each failed requirement and why it failed.\n\n")
+	b.WriteString("If ANY requirement is NOT satisfied or lacks adequate test coverage, " +
+		"create a file called `verify-failed.txt` listing each failed requirement and why it failed " +
+		"(including any that lack tests).\n\n")
 
 	b.WriteString("Do not modify any source code. Do not fix anything. Only verify and report.\n")
 
