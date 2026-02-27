@@ -59,6 +59,7 @@ func NewApp() *cli.App {
 			mergeCommand(),
 			reconcileCommand(),
 			verifyCommand(),
+			fixCommand(),
 			statusCommand(),
 			listCommand(),
 			milestoneCommand(),
@@ -1150,6 +1151,23 @@ func verifyCommand() *cli.Command {
 			}
 
 			return r.Verify()
+		},
+	}
+}
+
+func fixCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "fix",
+		Usage: "Scan for and fix project issues",
+		Description: "Checks for duplicate task names, stale locks, work directories on " +
+			"wrong branches, remote URL mismatches, missing state directories, and orphaned " +
+			"work directories. Fixes what it can and reports the rest.",
+		Action: func(_ *cli.Context) error {
+			r, err := newRunner()
+			if err != nil {
+				return err
+			}
+			return r.Fix()
 		},
 	}
 }

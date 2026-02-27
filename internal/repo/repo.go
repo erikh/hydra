@@ -217,6 +217,11 @@ func (r *Repo) IsAncestor(ancestor, ref string) bool {
 	return err == nil
 }
 
+// RemoteURL returns the URL of the origin remote.
+func (r *Repo) RemoteURL() (string, error) {
+	return r.run("remote", "get-url", "origin")
+}
+
 // MergeBase returns the merge-base commit between two refs.
 func (r *Repo) MergeBase(a, b string) (string, error) {
 	return r.run("merge-base", a, b)
