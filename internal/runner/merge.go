@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/erikh/hydra/internal/config"
@@ -273,6 +274,40 @@ func (r *Runner) closeIssueIfNeeded(task *design.Task, sha string) {
 	if err := r.IssueCloser.CloseIssue(num, comment); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not close issue #%d: %v\n", num, err)
 	}
+}
+
+// MergeGroup merges all review/merge tasks in a group sequentially.
+func (r *Runner) MergeGroup(groupName string) error {
+	var groupTasks []design.Task
+
+	for _, state := range []design.TaskState{design.StateReview, design.StateMerge} {
+		tasks, err := r.Design.TasksByState(state)
+		if err != nil {
+			return fmt.Errorf("listing %s tasks: %w", state, err)
+		}
+		for _, t := range tasks {
+			if t.Group == groupName {
+				groupTasks = append(groupTasks, t)
+			}
+		}
+	}
+
+	if len(groupTasks) == 0 {
+		return fmt.Errorf("no review/merge tasks found in group %q", groupName)
+	}
+
+	sort.Slice(groupTasks, func(i, j int) bool {
+		return groupTasks[i].Name < groupTasks[j].Name
+	})
+
+	for _, t := range groupTasks {
+		taskRef := groupName + "/" + t.Name
+		if err := r.Merge(taskRef); err != nil {
+			return fmt.Errorf("task %s: %w", taskRef, err)
+		}
+	}
+
+	return nil
 }
 
 // MergeList prints tasks in merge state.

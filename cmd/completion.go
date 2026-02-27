@@ -404,6 +404,36 @@ func completeGroups(cCtx *cli.Context) {
 	}
 }
 
+// completeAllGroups prints group names from all states for shell tab completion.
+func completeAllGroups(cCtx *cli.Context) {
+	if cCtx.NArg() > 0 {
+		return
+	}
+
+	cfg, err := config.Discover()
+	if err != nil {
+		return
+	}
+
+	dd, err := design.NewDir(cfg.DesignDir)
+	if err != nil {
+		return
+	}
+
+	tasks, err := dd.AllTasks()
+	if err != nil {
+		return
+	}
+
+	seen := make(map[string]bool)
+	for _, t := range tasks {
+		if t.Group != "" && !seen[t.Group] {
+			seen[t.Group] = true
+			fmt.Println(t.Group)
+		}
+	}
+}
+
 // completeMilestones prints unacknowledged milestone dates for shell tab completion.
 func completeMilestones(cCtx *cli.Context) {
 	if cCtx.NArg() > 0 {
