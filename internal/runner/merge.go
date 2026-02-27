@@ -170,8 +170,10 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 	var b strings.Builder
 
 	b.WriteString("# Merge Workflow\n\n")
-	b.WriteString("This branch is being merged into the default branch. " +
-		"Complete all steps below in order. " +
+	b.WriteString("This feature branch is being prepared for merge into the default branch. " +
+		"You are on the feature branch. Stay on it — do NOT checkout main or any other branch. " +
+		"Do NOT push. The tool handles all branch switching and pushing after you finish.\n\n")
+	b.WriteString("Complete all steps below in order. " +
 		"Do not make changes beyond what is required for the merge — resolve conflicts, validate commits and tests, and commit. Nothing else.\n\n")
 
 	b.WriteString("## Task Document\n\n")
