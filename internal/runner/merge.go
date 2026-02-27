@@ -159,6 +159,9 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 		"Complete all steps below in order. " +
 		"Do not make changes beyond what is required for the merge — resolve conflicts, validate commits and tests, and commit. Nothing else.\n\n")
 
+	b.WriteString("## Fetch Remote\n\n")
+	b.WriteString("Before doing anything else, run `git fetch origin` to ensure you have the latest remote state.\n\n")
+
 	b.WriteString("## Task Document\n\n")
 	b.WriteString(taskContent)
 	b.WriteString("\n\n")
