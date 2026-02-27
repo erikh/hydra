@@ -1,9 +1,12 @@
 package runner
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
@@ -64,13 +67,9 @@ func (r *Runner) Fix() error {
 }
 
 // fixDuplicateTaskNames checks for the same task name appearing in multiple states.
+// When duplicates are found, prompts the user to choose which copy to keep.
 func (r *Runner) fixDuplicateTaskNames() (int, error) {
-	type loc struct {
-		state design.TaskState
-		group string
-	}
-
-	seen := make(map[string][]loc)
+	seen := make(map[string][]design.Task)
 
 	for _, state := range []design.TaskState{
 		design.StatePending, design.StateReview, design.StateMerge,
@@ -81,25 +80,54 @@ func (r *Runner) fixDuplicateTaskNames() (int, error) {
 			continue
 		}
 		for _, t := range tasks {
-			seen[t.Name] = append(seen[t.Name], loc{state: state, group: t.Group})
+			seen[t.Name] = append(seen[t.Name], t)
 		}
 	}
 
+	reader := bufio.NewReader(os.Stdin)
 	issues := 0
-	for name, locs := range seen {
-		if len(locs) <= 1 {
+	for name, tasks := range seen {
+		if len(tasks) <= 1 {
 			continue
 		}
 		issues++
-		fmt.Printf("CONFLICT: task %q exists in multiple states:", name)
-		for _, l := range locs {
-			label := string(l.state)
-			if l.group != "" {
-				label += " (" + l.group + ")"
+
+		fmt.Printf("CONFLICT: task %q exists in %d states:\n", name, len(tasks))
+		for i, t := range tasks {
+			label := string(t.State)
+			if t.Group != "" {
+				label += " (group: " + t.Group + ")"
 			}
-			fmt.Printf(" %s", label)
+			fmt.Printf("  [%d] %s — %s\n", i+1, label, t.FilePath)
 		}
-		fmt.Println()
+		fmt.Printf("  [s] skip (do nothing)\n")
+		fmt.Printf("Which copy to keep? ")
+
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		if input == "s" || input == "" {
+			fmt.Printf("  Skipped.\n")
+			continue
+		}
+
+		choice, err := strconv.Atoi(input)
+		if err != nil || choice < 1 || choice > len(tasks) {
+			fmt.Printf("  Invalid choice, skipping.\n")
+			continue
+		}
+
+		// Delete all copies except the chosen one.
+		for i, t := range tasks {
+			if i == choice-1 {
+				continue
+			}
+			if err := r.Design.DeleteTask(&t); err != nil {
+				fmt.Printf("  ERROR: could not remove %s: %v\n", t.FilePath, err)
+			} else {
+				fmt.Printf("  FIXED: removed %s copy (%s)\n", t.State, t.FilePath)
+			}
+		}
 	}
 
 	return issues, nil
