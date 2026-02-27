@@ -292,8 +292,8 @@ func (r *Runner) Run(taskName string) error {
 	return nil
 }
 
-// listReviewMergeTasks prints tasks in both review and merge states.
-// Review and merge share the same task pool since merge is a continuation of review.
+// listReviewMergeTasks prints tasks in both review and merge states,
+// sorted so that grouped tasks stay together.
 func (r *Runner) listReviewMergeTasks(emptyMsg string) error {
 	var all []design.Task
 	for _, state := range []design.TaskState{design.StateReview, design.StateMerge} {
@@ -309,7 +309,9 @@ func (r *Runner) listReviewMergeTasks(emptyMsg string) error {
 		return nil
 	}
 
+	// Build deduplicated label list.
 	seen := make(map[string]bool)
+	var labels []string
 	for _, t := range all {
 		label := t.Name
 		if t.Group != "" {
@@ -317,8 +319,14 @@ func (r *Runner) listReviewMergeTasks(emptyMsg string) error {
 		}
 		if !seen[label] {
 			seen[label] = true
-			fmt.Println(label)
+			labels = append(labels, label)
 		}
+	}
+
+	sort.Strings(labels)
+
+	for _, label := range labels {
+		fmt.Println(label)
 	}
 	return nil
 }
