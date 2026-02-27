@@ -52,6 +52,9 @@ func (r *Runner) Merge(taskName string) error {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
+	// Abort any in-progress rebase from a previous failed attempt.
+	_ = taskRepo.RebaseAbort()
+
 	// Checkout the task's branch.
 	branch := task.BranchName()
 	if !taskRepo.BranchExists(branch) {
