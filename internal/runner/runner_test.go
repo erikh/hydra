@@ -3048,7 +3048,7 @@ func TestFixOrphanedWorkDirsRemoved(t *testing.T) {
 	}
 
 	// Run fix.
-	if err := r.Fix(); err != nil {
+	if err := r.Fix(true); err != nil {
 		t.Fatalf("Fix: %v", err)
 	}
 
@@ -3074,12 +3074,176 @@ func TestFixOrphanedGroupWorkDirsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := r.Fix(); err != nil {
+	if err := r.Fix(true); err != nil {
 		t.Fatalf("Fix: %v", err)
 	}
 
 	if _, err := os.Stat(orphanDir); !os.IsNotExist(err) {
 		t.Error("orphaned grouped work directory should have been removed by fix")
+	}
+}
+
+func TestFixNoAutoConfirmDoesNotApply(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Create an orphaned work directory.
+	orphanDir := filepath.Join(env.BaseDir, "work", "nonexistent-task")
+	if err := os.MkdirAll(orphanDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	// Provide "n" to confirmation prompt via stdin.
+	oldStdin := os.Stdin
+	pr, pw, _ := os.Pipe()
+	_, _ = pw.WriteString("n\n")
+	pw.Close()
+	os.Stdin = pr
+	defer func() { os.Stdin = oldStdin }()
+
+	// Run fix without auto-confirm.
+	if err := r.Fix(false); err != nil {
+		t.Fatalf("Fix: %v", err)
+	}
+
+	// Orphaned directory should NOT be removed (user declined).
+	if _, err := os.Stat(orphanDir); os.IsNotExist(err) {
+		t.Error("orphaned work directory should NOT have been removed without confirmation")
+	}
+}
+
+func TestReviewListSortsGroupsTogether(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run multiple tasks (ungrouped and grouped) to move them to review.
+	for _, name := range []string{"another-task", "add-feature", "backend/add-api"} {
+		if err := r.Run(name); err != nil {
+			t.Fatalf("Run(%s): %v", name, err)
+		}
+		// Reload after each run.
+		r, err = New(env.Config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Claude = mockClaude
+		r.BaseDir = env.BaseDir
+	}
+
+	// Capture ReviewList output.
+	old := os.Stdout
+	rd, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := r.ReviewList(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("ReviewList: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(rd)
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d: %q", len(lines), string(out))
+	}
+
+	// Verify sorted order: add-feature, another-task, backend/add-api.
+	for i := 1; i < len(lines); i++ {
+		if lines[i-1] > lines[i] {
+			t.Errorf("list not sorted: %q comes before %q", lines[i-1], lines[i])
+		}
+	}
+}
+
+func TestGroupListSorted(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Create a second group so we can verify sort order.
+	mkdirAll(t, filepath.Join(env.DesignDir, "tasks", "alpha"))
+	writeFile(t, filepath.Join(env.DesignDir, "tasks", "alpha", "task1.md"), "Alpha task.")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Capture GroupList output.
+	old := os.Stdout
+	rd, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := r.GroupList(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("GroupList: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(rd)
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 groups, got %d: %q", len(lines), string(out))
+	}
+
+	// Verify sorted: alpha before backend.
+	for i := 1; i < len(lines); i++ {
+		if lines[i-1] > lines[i] {
+			t.Errorf("group list not sorted: %q comes before %q", lines[i-1], lines[i])
+		}
+	}
+}
+
+func TestGroupTasksSorted(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Capture GroupTasks output.
+	old := os.Stdout
+	rd, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := r.GroupTasks("backend"); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("GroupTasks: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(rd)
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 tasks in backend group, got %d: %q", len(lines), string(out))
+	}
+
+	// Verify sorted order (by task name within group).
+	for i := 1; i < len(lines); i++ {
+		if lines[i-1] > lines[i] {
+			t.Errorf("group tasks not sorted: %q comes before %q", lines[i-1], lines[i])
+		}
 	}
 }
 
@@ -3120,7 +3284,7 @@ func TestFixStuckMergeTasksMovedToReview(t *testing.T) {
 	}
 
 	// Run fix — should move it back to review since no lock is held.
-	if err := r.Fix(); err != nil {
+	if err := r.Fix(true); err != nil {
 		t.Fatalf("Fix: %v", err)
 	}
 

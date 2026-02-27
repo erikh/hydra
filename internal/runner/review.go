@@ -27,9 +27,11 @@ func (r *Runner) ReviewDev(ctx context.Context, taskName string) error {
 	}
 
 	branch := task.BranchName()
-	if taskRepo.BranchExists(branch) {
-		if err := taskRepo.Checkout(branch); err != nil {
-			return fmt.Errorf("checking out branch: %w", err)
+	if dirty, _ := taskRepo.HasChanges(); !dirty {
+		if taskRepo.BranchExists(branch) {
+			if err := taskRepo.Checkout(branch); err != nil {
+				return fmt.Errorf("checking out branch: %w", err)
+			}
 		}
 	}
 
@@ -74,26 +76,28 @@ func (r *Runner) Review(taskName string) error {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
-	// Checkout the task's branch.
+	// Checkout the task's branch (skip if working tree is dirty).
 	branch := task.BranchName()
-	if !taskRepo.BranchExists(branch) {
-		if err := taskRepo.CreateBranch(branch); err != nil {
-			return fmt.Errorf("creating branch: %w", err)
+	if dirty, _ := taskRepo.HasChanges(); !dirty {
+		if !taskRepo.BranchExists(branch) {
+			if err := taskRepo.CreateBranch(branch); err != nil {
+				return fmt.Errorf("creating branch: %w", err)
+			}
+		} else {
+			if err := taskRepo.Checkout(branch); err != nil {
+				return fmt.Errorf("checking out branch: %w", err)
+			}
 		}
-	} else {
-		if err := taskRepo.Checkout(branch); err != nil {
-			return fmt.Errorf("checking out branch: %w", err)
-		}
-	}
 
-	// Rebase onto latest remote main if requested.
-	if r.Rebase {
-		conflictFiles, err := r.attemptRebase(taskRepo)
-		if err != nil {
-			return fmt.Errorf("rebasing onto main: %w", err)
-		}
-		if len(conflictFiles) > 0 {
-			return fmt.Errorf("rebase conflicts — resolve manually before reviewing: %v", conflictFiles)
+		// Rebase onto latest remote main if requested.
+		if r.Rebase {
+			conflictFiles, err := r.attemptRebase(taskRepo)
+			if err != nil {
+				return fmt.Errorf("rebasing onto main: %w", err)
+			}
+			if len(conflictFiles) > 0 {
+				return fmt.Errorf("rebase conflicts — resolve manually before reviewing: %v", conflictFiles)
+			}
 		}
 	}
 
@@ -266,8 +270,10 @@ func (r *Runner) ReviewDiff(taskName string) error {
 	if !taskRepo.BranchExists(branch) {
 		return fmt.Errorf("branch %q does not exist", branch)
 	}
-	if err := taskRepo.Checkout(branch); err != nil {
-		return fmt.Errorf("checking out branch: %w", err)
+	if dirty, _ := taskRepo.HasChanges(); !dirty {
+		if err := taskRepo.Checkout(branch); err != nil {
+			return fmt.Errorf("checking out branch: %w", err)
+		}
 	}
 
 	if err := taskRepo.Fetch(); err != nil {

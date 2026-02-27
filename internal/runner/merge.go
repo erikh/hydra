@@ -63,22 +63,28 @@ func (r *Runner) Merge(taskName string) error {
 		return fmt.Errorf("fetching origin: %w", err)
 	}
 
-	// Step 2: Checkout the task's branch.
+	// Step 2: Checkout the task's branch (skip if working tree is dirty).
 	branch := task.BranchName()
 	if !taskRepo.BranchExists(branch) {
 		return fmt.Errorf("task branch %q does not exist", branch)
 	}
-	if err := taskRepo.Checkout(branch); err != nil {
-		return fmt.Errorf("checking out branch: %w", err)
+	if dirty, _ := taskRepo.HasChanges(); !dirty {
+		if err := taskRepo.Checkout(branch); err != nil {
+			return fmt.Errorf("checking out branch: %w", err)
+		}
 	}
 
 	// Step 3: Abort any in-progress rebase from a previous failed attempt.
 	_ = taskRepo.RebaseAbort()
 
 	// Step 4: Rebase task branch onto origin/main; collect conflict info if any.
-	conflictFiles, err := r.attemptRebase(taskRepo)
-	if err != nil {
-		return err
+	// Skip rebase if the working tree is dirty — let Claude handle it.
+	var conflictFiles []string
+	if dirty, _ := taskRepo.HasChanges(); !dirty {
+		conflictFiles, err = r.attemptRebase(taskRepo)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Step 5: Assemble document and invoke Claude.

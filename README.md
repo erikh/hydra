@@ -301,23 +301,27 @@ After importing, sync cleans up completed and abandoned tasks: remote feature br
 
 ### `hydra fix`
 
-Scans the project for issues and fixes what it can:
+Scans the project for issues, reports them all, then prompts for confirmation before applying fixes.
 
 - **Duplicate task names** — Detects the same task name appearing in multiple states and prompts you to choose which copy to keep
 - **Stale locks** — Removes lock files held by dead processes
 - **Wrong branches** — Checks that work directories are on the correct task branch and checks them out if needed
 - **Mismatched remotes** — Reports work directories whose origin remote doesn't match the configured source repo
 - **Missing state directories** — Creates any missing state directories (`review`, `merge`, `completed`, `abandoned`)
-- **Orphaned work directories** — Removes work directories that have no corresponding task
+- **Orphaned work directories** — Recursively removes work directories that have no corresponding task
 - **Stuck merge tasks** — Moves tasks stuck in merge state (with no active lock) back to review
+
+**Flags:**
+
+- `--yes` / `-y` — Skip confirmation prompt and apply fixes immediately
 
 ### `hydra list`
 
-Lists all pending tasks. Grouped tasks are displayed as `group/name`.
+Lists all pending tasks sorted alphabetically. Grouped tasks are displayed as `group/name`, keeping groups together.
 
 ### `hydra status`
 
-Shows tasks grouped by state (pending, review, merge, completed, abandoned) and any currently running task.
+Shows tasks grouped by state (pending, review, merge, completed, abandoned) and any currently running task. Tasks within each state are sorted alphabetically.
 
 **Flags:**
 

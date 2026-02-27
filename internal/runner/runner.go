@@ -203,14 +203,25 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	// Check out existing task branch, or create a new one.
+	// If the working tree is dirty, skip branch operations — let Claude work on it as-is.
 	branch := task.BranchName()
-	if taskRepo.BranchExists(branch) {
-		if err := taskRepo.Checkout(branch); err != nil {
-			return fmt.Errorf("checking out branch: %w", err)
+	if dirty, _ := taskRepo.HasChanges(); !dirty {
+		if taskRepo.BranchExists(branch) {
+			if err := taskRepo.Checkout(branch); err != nil {
+				return fmt.Errorf("checking out branch: %w", err)
+			}
+		} else {
+			if err := taskRepo.CreateBranch(branch); err != nil {
+				return fmt.Errorf("creating branch: %w", err)
+			}
 		}
 	} else {
-		if err := taskRepo.CreateBranch(branch); err != nil {
-			return fmt.Errorf("creating branch: %w", err)
+		// Dirty tree — ensure we're at least on the right branch if possible.
+		if taskRepo.BranchExists(branch) {
+			currentBranch, _ := taskRepo.CurrentBranch()
+			if currentBranch != branch {
+				fmt.Fprintf(os.Stderr, "Warning: working tree is dirty and on %s, expected %s; letting Claude continue\n", currentBranch, branch)
+			}
 		}
 	}
 

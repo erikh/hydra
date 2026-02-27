@@ -34,15 +34,18 @@ func (r *Runner) Verify() error {
 	}
 
 	// Fetch and rebase against origin/main to ensure we verify the latest code.
+	// Skip rebase if the working tree is dirty — let Claude work on it as-is.
 	if err := verifyRepo.Fetch(); err != nil {
 		return fmt.Errorf("fetching origin: %w", err)
 	}
-	defaultBranch, err := r.detectDefaultBranch(verifyRepo)
-	if err != nil {
-		return fmt.Errorf("detecting default branch: %w", err)
-	}
-	if err := verifyRepo.Rebase("origin/" + defaultBranch); err != nil {
-		return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
+	if dirty, _ := verifyRepo.HasChanges(); !dirty {
+		defaultBranch, err := r.detectDefaultBranch(verifyRepo)
+		if err != nil {
+			return fmt.Errorf("detecting default branch: %w", err)
+		}
+		if err := verifyRepo.Rebase("origin/" + defaultBranch); err != nil {
+			return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
+		}
 	}
 
 	// Run before hook.

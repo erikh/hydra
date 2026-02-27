@@ -14,66 +14,113 @@ import (
 	"github.com/erikh/hydra/internal/repo"
 )
 
-// Fix scans the project for issues and fixes what it can.
+// fixAction describes a single issue found by the scanner and a function to fix it.
+type fixAction struct {
+	description string
+	fix         func() error
+}
+
+// Fix scans the project for issues, reports them, and prompts for confirmation
+// before applying fixes. Duplicate task conflicts are handled interactively
+// before the main scan. If autoConfirm is true, fixes are applied without prompting.
 // Returns an error only if scanning itself fails, not for individual issues.
-func (r *Runner) Fix() error {
+func (r *Runner) Fix(autoConfirm bool) error {
 	baseDir := r.BaseDir
-	if baseDir == "" {
+	if baseDir == ""  {
 		baseDir = "."
 	}
 
-	var issues int
-
-	i, err := r.fixDuplicateTaskNames()
+	// Handle duplicate task conflicts first (interactive — requires per-conflict choices).
+	dupes, err := r.fixDuplicateTaskNames()
 	if err != nil {
 		return fmt.Errorf("checking duplicate tasks: %w", err)
 	}
-	issues += i
 
-	i, err = r.fixStaleLocks(baseDir)
+	// Scan for all other fixable issues.
+	var actions []fixAction
+
+	a, err := r.scanStaleLocks(baseDir)
 	if err != nil {
 		return fmt.Errorf("checking stale locks: %w", err)
 	}
-	issues += i
+	actions = append(actions, a...)
 
-	i, err = r.fixWorkDirBranches(baseDir)
+	a, err = r.scanWorkDirBranches(baseDir)
 	if err != nil {
 		return fmt.Errorf("checking work directories: %w", err)
 	}
-	issues += i
+	actions = append(actions, a...)
 
-	i, err = r.fixWorkDirRemotes(baseDir)
-	if err != nil {
-		return fmt.Errorf("checking remotes: %w", err)
-	}
-	issues += i
+	a = r.scanMissingStateDirs()
+	actions = append(actions, a...)
 
-	i = r.fixMissingStateDirs()
-	issues += i
-
-	i, err = r.fixOrphanedWorkDirs(baseDir)
+	a, err = r.scanOrphanedWorkDirs(baseDir)
 	if err != nil {
 		return fmt.Errorf("checking orphaned work dirs: %w", err)
 	}
-	issues += i
+	actions = append(actions, a...)
 
-	i, err = r.fixStuckMergeTasks()
+	a, err = r.scanStuckMergeTasks()
 	if err != nil {
 		return fmt.Errorf("checking stuck merge tasks: %w", err)
 	}
-	issues += i
+	actions = append(actions, a...)
 
-	if issues == 0 {
-		fmt.Println("No issues found.")
-	} else {
-		fmt.Printf("\n%d issue(s) found.\n", issues)
+	// Report non-fixable issues (remotes).
+	warns, err := r.scanWorkDirRemotes(baseDir)
+	if err != nil {
+		return fmt.Errorf("checking remotes: %w", err)
+	}
+	for _, w := range warns {
+		fmt.Println(w)
 	}
 
+	total := dupes + len(actions) + len(warns)
+	if total == 0 {
+		fmt.Println("No issues found.")
+		return nil
+	}
+
+	if len(actions) == 0 {
+		fmt.Printf("\n%d issue(s) found.\n", total)
+		return nil
+	}
+
+	// Report what will be fixed.
+	fmt.Printf("\nIssues to fix:\n")
+	for i, a := range actions {
+		fmt.Printf("  %d. %s\n", i+1, a.description)
+	}
+
+	// Prompt for confirmation unless auto-confirmed.
+	if !autoConfirm {
+		fmt.Printf("\nApply %d fix(es)? [y/N] ", len(actions))
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+
+		if input != "y" && input != "yes" {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	// Apply fixes.
+	for _, a := range actions {
+		if err := a.fix(); err != nil {
+			fmt.Printf("ERROR: %s: %v\n", a.description, err)
+		} else {
+			fmt.Printf("FIXED: %s\n", a.description)
+		}
+	}
+
+	fmt.Printf("\n%d issue(s) found, %d fix(es) applied.\n", total, len(actions))
 	return nil
 }
 
 // fixDuplicateTaskNames checks for the same task name appearing in multiple states.
 // When duplicates are found, prompts the user to choose which copy to keep.
+// Returns the number of conflicts found.
 func (r *Runner) fixDuplicateTaskNames() (int, error) {
 	seen := make(map[string][]design.Task)
 
@@ -139,37 +186,21 @@ func (r *Runner) fixDuplicateTaskNames() (int, error) {
 	return issues, nil
 }
 
-// fixStaleLocks removes lock files held by dead processes.
-func (r *Runner) fixStaleLocks(baseDir string) (int, error) {
+// scanStaleLocks finds lock files held by dead processes.
+func (r *Runner) scanStaleLocks(baseDir string) ([]fixAction, error) {
 	hydraDir := config.HydraPath(baseDir)
 	pattern := filepath.Join(hydraDir, "hydra-*.lock")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return 0, err
-	}
-
-	issues := 0
-	for _, path := range matches {
-		data, err := os.ReadFile(path) //nolint:gosec // lock files in hydra dir
-		if err != nil {
-			continue
-		}
-
-		// Check if the lock's process is still alive using lock.ReadAll logic.
-		// We parse manually since lock internals aren't exported.
-		_ = data // parsed below via ReadAll
+		return nil, err
 	}
 
 	// Use ReadAll to get live locks, then compare against all lock files.
 	live, _ := lock.ReadAll(hydraDir)
-	liveSet := make(map[string]bool)
-	for _, rt := range live {
-		liveSet[rt.TaskName] = true
-	}
 
+	var actions []fixAction
 	for _, path := range matches {
 		base := filepath.Base(path)
-		// Check if this lock file corresponds to any live task.
 		isLive := false
 		for _, rt := range live {
 			expected := "hydra-" + sanitizeLockName(rt.TaskName) + ".lock"
@@ -179,28 +210,19 @@ func (r *Runner) fixStaleLocks(baseDir string) (int, error) {
 			}
 		}
 		if !isLive {
-			issues++
-			fmt.Printf("FIXED: removed stale lock %s\n", base)
-			_ = os.Remove(path)
+			p := path // capture for closure
+			actions = append(actions, fixAction{
+				description: fmt.Sprintf("remove stale lock %s", base),
+				fix:         func() error { return os.Remove(p) },
+			})
 		}
 	}
 
-	return issues, nil
+	return actions, nil
 }
 
 // sanitizeLockName matches the lock package's slash-to-dash conversion.
 func sanitizeLockName(name string) string {
-	result := make([]byte, len(name))
-	for i := range len(name) {
-		if name[i] == '/' {
-			result[i] = '-'
-			// The lock package uses "--" for slashes.
-			// We need to match lockFileName exactly.
-		} else {
-			result[i] = name[i]
-		}
-	}
-	// Actually re-implement the exact logic from the lock package.
 	out := ""
 	for _, c := range name {
 		if c == '/' {
@@ -212,14 +234,14 @@ func sanitizeLockName(name string) string {
 	return out
 }
 
-// fixWorkDirBranches checks that work directories are on the correct branch.
-func (r *Runner) fixWorkDirBranches(baseDir string) (int, error) {
+// scanWorkDirBranches checks that work directories are on the correct branch.
+func (r *Runner) scanWorkDirBranches(baseDir string) ([]fixAction, error) {
 	tasks, err := r.Design.AllTasks()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	issues := 0
+	var actions []fixAction
 	for _, task := range tasks {
 		wd := r.workDir(&task)
 		if !repo.IsGitRepo(wd) {
@@ -240,31 +262,35 @@ func (r *Runner) fixWorkDirBranches(baseDir string) (int, error) {
 		}
 
 		if currentBranch != expectedBranch {
-			issues++
+			tr := taskRepo // capture
+			eb := expectedBranch
+			tn := task.Name
+			cb := currentBranch
 			if taskRepo.BranchExists(expectedBranch) {
-				if err := taskRepo.Checkout(expectedBranch); err == nil {
-					fmt.Printf("FIXED: %s checked out to %s (was %s)\n", task.Name, expectedBranch, currentBranch)
-				} else {
-					fmt.Printf("ERROR: %s on %s, expected %s (checkout failed: %v)\n", task.Name, currentBranch, expectedBranch, err)
-				}
+				actions = append(actions, fixAction{
+					description: fmt.Sprintf("checkout %s to %s (currently %s)", tn, eb, cb),
+					fix:         func() error { return tr.Checkout(eb) },
+				})
 			} else {
-				fmt.Printf("WARN: %s on %s, expected %s (branch does not exist)\n", task.Name, currentBranch, expectedBranch)
+				// Can't fix this one, just warn.
+				fmt.Printf("WARN: %s on %s, expected %s (branch does not exist)\n", tn, cb, eb)
 			}
 		}
 	}
 
-	return issues, nil
+	return actions, nil
 }
 
-// fixWorkDirRemotes checks that work directory remotes point to the configured source repo.
-func (r *Runner) fixWorkDirRemotes(baseDir string) (int, error) {
+// scanWorkDirRemotes checks that work directory remotes point to the configured source repo.
+// Returns warning strings since remote mismatches can't be auto-fixed.
+func (r *Runner) scanWorkDirRemotes(baseDir string) ([]string, error) {
 	tasks, err := r.Design.AllTasks()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	expected := r.Config.SourceRepoURL
-	issues := 0
+	var warns []string
 
 	for _, task := range tasks {
 		wd := r.workDir(&task)
@@ -275,14 +301,12 @@ func (r *Runner) fixWorkDirRemotes(baseDir string) (int, error) {
 		taskRepo := repo.Open(wd)
 		remote, err := taskRepo.RemoteURL()
 		if err != nil {
-			issues++
-			fmt.Printf("ERROR: %s has no origin remote\n", task.Name)
+			warns = append(warns, fmt.Sprintf("ERROR: %s has no origin remote", task.Name))
 			continue
 		}
 
 		if remote != expected {
-			issues++
-			fmt.Printf("MISMATCH: %s remote is %s, expected %s\n", task.Name, remote, expected)
+			warns = append(warns, fmt.Sprintf("MISMATCH: %s remote is %s, expected %s", task.Name, remote, expected))
 		}
 	}
 
@@ -298,16 +322,15 @@ func (r *Runner) fixWorkDirRemotes(baseDir string) (int, error) {
 			continue
 		}
 		if remote != expected {
-			issues++
-			fmt.Printf("MISMATCH: %s remote is %s, expected %s\n", name, remote, expected)
+			warns = append(warns, fmt.Sprintf("MISMATCH: %s remote is %s, expected %s", name, remote, expected))
 		}
 	}
 
-	return issues, nil
+	return warns, nil
 }
 
-// fixMissingStateDirs ensures all state directories exist.
-func (r *Runner) fixMissingStateDirs() int {
+// scanMissingStateDirs finds state directories that don't exist.
+func (r *Runner) scanMissingStateDirs() []fixAction {
 	dirs := []string{
 		filepath.Join(r.Design.Path, "tasks"),
 		filepath.Join(r.Design.Path, "state", "review"),
@@ -316,122 +339,97 @@ func (r *Runner) fixMissingStateDirs() int {
 		filepath.Join(r.Design.Path, "state", "abandoned"),
 	}
 
-	issues := 0
+	var actions []fixAction
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			issues++
-			if err := os.MkdirAll(dir, 0o750); err == nil {
-				fmt.Printf("FIXED: created missing directory %s\n", dir)
-			} else {
-				fmt.Printf("ERROR: could not create %s: %v\n", dir, err)
-			}
+			d := dir // capture
+			actions = append(actions, fixAction{
+				description: fmt.Sprintf("create missing directory %s", d),
+				fix:         func() error { return os.MkdirAll(d, 0o750) },
+			})
 		}
 	}
 
-	return issues
+	return actions
 }
 
-// fixOrphanedWorkDirs finds work directories that have no corresponding task.
-func (r *Runner) fixOrphanedWorkDirs(baseDir string) (int, error) {
+// scanOrphanedWorkDirs finds work directories that have no corresponding task.
+func (r *Runner) scanOrphanedWorkDirs(baseDir string) ([]fixAction, error) {
 	workRoot := filepath.Join(baseDir, "work")
 	if _, err := os.Stat(workRoot); os.IsNotExist(err) {
-		return 0, nil
+		return nil, nil
 	}
 
 	tasks, err := r.Design.AllTasks()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	// Build set of expected work dir paths.
-	expected := make(map[string]bool)
+	// Build sets: leaf dirs are task work dirs (don't recurse into),
+	// parent dirs are group directories (recurse into to check children).
+	leafDirs := make(map[string]bool)
+	parentDirs := make(map[string]bool)
 	for _, t := range tasks {
-		expected[r.workDir(&t)] = true
+		wd := r.workDir(&t)
+		leafDirs[wd] = true
+		if t.Group != "" {
+			parentDirs[filepath.Dir(wd)] = true
+		}
 	}
-	// Add special dirs.
-	expected[filepath.Join(baseDir, "work", "_reconcile")] = true
-	expected[filepath.Join(baseDir, "work", "_verify")] = true
+	// Special dirs are also leaves.
+	leafDirs[filepath.Join(baseDir, "work", "_reconcile")] = true
+	leafDirs[filepath.Join(baseDir, "work", "_verify")] = true
 
-	issues := 0
+	return r.collectOrphanedWorkDirs(workRoot, leafDirs, parentDirs)
+}
 
-	entries, err := os.ReadDir(workRoot)
+// collectOrphanedWorkDirs recursively walks a work directory tree, collecting
+// fixActions for directories not in the expected sets.
+func (r *Runner) collectOrphanedWorkDirs(dir string, leafDirs, parentDirs map[string]bool) ([]fixAction, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
+	var actions []fixAction
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 
-		entryPath := filepath.Join(workRoot, entry.Name())
+		entryPath := filepath.Join(dir, entry.Name())
 
-		// Check if it's a direct work dir.
-		if expected[entryPath] {
+		if leafDirs[entryPath] {
+			// Known task work dir — skip (don't recurse into it).
 			continue
 		}
 
-		// Could be a group directory — check children.
-		if isGroupWorkDir(entryPath) {
-			subEntries, err := os.ReadDir(entryPath)
+		if parentDirs[entryPath] {
+			// Group parent dir — recurse to check children.
+			a, err := r.collectOrphanedWorkDirs(entryPath, leafDirs, parentDirs)
 			if err != nil {
-				continue
+				return actions, err
 			}
-			for _, sub := range subEntries {
-				if !sub.IsDir() {
-					continue
-				}
-				subPath := filepath.Join(entryPath, sub.Name())
-				if !expected[subPath] {
-					issues++
-					if err := os.RemoveAll(subPath); err == nil {
-						fmt.Printf("FIXED: removed orphaned work directory %s\n", subPath)
-					} else {
-						fmt.Printf("ERROR: could not remove orphaned work directory %s: %v\n", subPath, err)
-					}
-				}
-			}
-			// Remove the group dir if now empty.
-			remaining, _ := os.ReadDir(entryPath)
-			if len(remaining) == 0 {
-				_ = os.Remove(entryPath)
-			}
+			actions = append(actions, a...)
 			continue
 		}
 
-		// Not expected and not a group dir.
-		issues++
-		if err := os.RemoveAll(entryPath); err == nil {
-			fmt.Printf("FIXED: removed orphaned work directory %s\n", entryPath)
-		} else {
-			fmt.Printf("ERROR: could not remove orphaned work directory %s: %v\n", entryPath, err)
-		}
+		// Not expected — schedule removal.
+		p := entryPath // capture
+		actions = append(actions, fixAction{
+			description: fmt.Sprintf("remove orphaned work directory %s", p),
+			fix:         func() error { return os.RemoveAll(p) },
+		})
 	}
 
-	return issues, nil
+	return actions, nil
 }
 
-// isGroupWorkDir returns true if the directory contains subdirectories
-// (suggesting it's a group work dir like work/backend/).
-func isGroupWorkDir(path string) bool {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			return true
-		}
-	}
-	return false
-}
-
-// fixStuckMergeTasks moves tasks from merge back to review when they have no
-// active lock (indicating a failed merge attempt left them stuck).
-func (r *Runner) fixStuckMergeTasks() (int, error) {
+// scanStuckMergeTasks finds tasks stuck in merge state with no active lock.
+func (r *Runner) scanStuckMergeTasks() ([]fixAction, error) {
 	tasks, err := r.Design.TasksByState(design.StateMerge)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	baseDir := r.BaseDir
@@ -440,7 +438,7 @@ func (r *Runner) fixStuckMergeTasks() (int, error) {
 	}
 	hydraDir := config.HydraPath(baseDir)
 
-	issues := 0
+	var actions []fixAction
 	for i := range tasks {
 		t := &tasks[i]
 		taskName := t.Name
@@ -455,13 +453,12 @@ func (r *Runner) fixStuckMergeTasks() (int, error) {
 		}
 
 		// No lock — this task is stuck in merge state.
-		issues++
-		if err := r.Design.MoveTask(t, design.StateReview); err != nil {
-			fmt.Printf("ERROR: could not move %s from merge to review: %v\n", taskName, err)
-		} else {
-			fmt.Printf("FIXED: moved stuck task %q from merge back to review\n", taskName)
-		}
+		task := t // capture
+		actions = append(actions, fixAction{
+			description: fmt.Sprintf("move stuck task %q from merge back to review", taskName),
+			fix:         func() error { return r.Design.MoveTask(task, design.StateReview) },
+		})
 	}
 
-	return issues, nil
+	return actions, nil
 }

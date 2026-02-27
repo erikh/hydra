@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -627,6 +628,7 @@ func statusCommand() *cli.Command {
 					}
 					*ss.dest = append(*ss.dest, label)
 				}
+				sort.Strings(*ss.dest)
 			}
 
 			var buf bytes.Buffer
@@ -691,11 +693,16 @@ func listCommand() *cli.Command {
 				return nil
 			}
 
+			var labels []string
 			for _, t := range tasks {
 				label := t.Name
 				if t.Group != "" {
 					label = t.Group + "/" + t.Name
 				}
+				labels = append(labels, label)
+			}
+			sort.Strings(labels)
+			for _, label := range labels {
 				fmt.Println(label)
 			}
 
@@ -1264,13 +1271,21 @@ func fixCommand() *cli.Command {
 		Usage: "Scan for and fix project issues",
 		Description: "Checks for duplicate task names, stale locks, work directories on " +
 			"wrong branches, remote URL mismatches, missing state directories, and orphaned " +
-			"work directories. Fixes what it can and reports the rest.",
-		Action: func(_ *cli.Context) error {
+			"work directories. Reports all issues found, then prompts for confirmation " +
+			"before applying fixes. Use -y to skip confirmation.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "yes",
+				Aliases: []string{"y"},
+				Usage:   "Skip confirmation prompt and apply fixes immediately",
+			},
+		},
+		Action: func(c *cli.Context) error {
 			r, err := newRunner()
 			if err != nil {
 				return err
 			}
-			return r.Fix()
+			return r.Fix(c.Bool("yes"))
 		},
 	}
 }

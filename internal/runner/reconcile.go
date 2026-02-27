@@ -56,15 +56,18 @@ func (r *Runner) Reconcile() error {
 	}
 
 	// Fetch and rebase against origin/main to ensure we reconcile against the latest code.
+	// Skip rebase if the working tree is dirty — let Claude work on it as-is.
 	if err := reconcileRepo.Fetch(); err != nil {
 		return fmt.Errorf("fetching origin: %w", err)
 	}
-	defaultBranch, err := r.detectDefaultBranch(reconcileRepo)
-	if err != nil {
-		return fmt.Errorf("detecting default branch: %w", err)
-	}
-	if err := reconcileRepo.Rebase("origin/" + defaultBranch); err != nil {
-		return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
+	if dirty, _ := reconcileRepo.HasChanges(); !dirty {
+		defaultBranch, err := r.detectDefaultBranch(reconcileRepo)
+		if err != nil {
+			return fmt.Errorf("detecting default branch: %w", err)
+		}
+		if err := reconcileRepo.Rebase("origin/" + defaultBranch); err != nil {
+			return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
+		}
 	}
 
 	// Copy current functional.md into the work directory for Claude to edit.
