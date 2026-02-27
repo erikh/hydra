@@ -40,7 +40,8 @@ func (r *Runner) Verify() error {
 
 	// Assemble document.
 	cmds := r.commandsMap(wd)
-	doc := assembleVerifyDocument(functional, cmds)
+	functionalPath, _ := filepath.Abs(filepath.Join(r.Config.DesignDir, "functional.md"))
+	doc := assembleVerifyDocument(functional, functionalPath, cmds)
 
 	// Invoke Claude.
 	claudeFn := r.Claude
@@ -84,7 +85,7 @@ func (r *Runner) Verify() error {
 }
 
 // assembleVerifyDocument builds the prompt for the verify workflow.
-func assembleVerifyDocument(functional string, cmds map[string]string) string {
+func assembleVerifyDocument(functional, functionalPath string, cmds map[string]string) string {
 	var b strings.Builder
 
 	b.WriteString("# Mission\n\nYour sole objective is to verify that every requirement in the functional specification " +
@@ -101,6 +102,15 @@ func assembleVerifyDocument(functional string, cmds map[string]string) string {
 	b.WriteString("3. Verify that the requirement has adequate test coverage — there should be tests that exercise the described behavior, including edge cases and error paths\n")
 	b.WriteString("4. Run the test suite to verify tests pass\n\n")
 
+	b.WriteString("## Functional Specification Updates\n\n")
+	b.WriteString("If the codebase contains functionality that is implemented and tested but not described " +
+		"in the functional specification above, update the functional specification file at:\n\n")
+	b.WriteString("`")
+	b.WriteString(functionalPath)
+	b.WriteString("`\n\n")
+	b.WriteString("Add any missing requirements that reflect the actual state of the codebase. " +
+		"This ensures the specification stays in sync with reality.\n\n")
+
 	b.WriteString(verificationSection(cmds))
 
 	b.WriteString("\nIf ALL requirements are satisfied, all have adequate test coverage, and all tests pass, " +
@@ -110,11 +120,14 @@ func assembleVerifyDocument(functional string, cmds map[string]string) string {
 		"create a file called `verify-failed.txt` listing each failed requirement and why it failed " +
 		"(including any that lack tests).\n\n")
 
-	b.WriteString("Do not modify any source code. Do not fix anything. Only verify and report.\n")
+	b.WriteString("Do not modify any source code. Do not fix anything. " +
+		"The only file you may modify outside the work directory is `" + functionalPath + "`.\n")
 
 	b.WriteString("\n# Reminder\n\n")
 	b.WriteString("Your ONLY job is to verify the functional requirements. " +
-		"Do not make any code changes. Only create verify-passed.txt or verify-failed.txt.\n")
+		"Do not make any code changes. You may update `" + functionalPath +
+		"` if the codebase has functionality not yet reflected in the specification. " +
+		"Create verify-passed.txt or verify-failed.txt.\n")
 
 	return b.String()
 }

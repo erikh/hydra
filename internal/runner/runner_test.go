@@ -2497,13 +2497,31 @@ func TestVerifyDocumentIncludesTestCoverage(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result := assembleVerifyDocument("Feature X must do Y.", cmds)
+	result := assembleVerifyDocument("Feature X must do Y.", "/tmp/design/functional.md", cmds)
 
 	if !strings.Contains(result, "adequate test coverage") {
 		t.Error("verify document missing test coverage instruction")
 	}
 	if !strings.Contains(result, "lacks adequate test coverage") {
 		t.Error("verify document missing test coverage failure criterion")
+	}
+}
+
+func TestVerifyDocumentIncludesFunctionalPath(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	path := "/home/user/project/design/functional.md"
+	result := assembleVerifyDocument("Feature X must do Y.", path, cmds)
+
+	if !strings.Contains(result, path) {
+		t.Error("verify document missing absolute path to functional.md")
+	}
+	if !strings.Contains(result, "Functional Specification Updates") {
+		t.Error("verify document missing functional spec update section")
+	}
+	if !strings.Contains(result, "not described") {
+		t.Error("verify document missing instruction to add undocumented functionality")
 	}
 }
 

@@ -116,6 +116,17 @@ func TestVerifyDocumentContents(t *testing.T) {
 	if !strings.Contains(captured, "verify-failed.txt") {
 		t.Error("document missing verify-failed.txt reference")
 	}
+
+	// Verify document contains absolute path to functional.md.
+	functionalPath := filepath.Join(env.DesignDir, "functional.md")
+	if !strings.Contains(captured, functionalPath) {
+		t.Errorf("document missing absolute path to functional.md (%s)", functionalPath)
+	}
+
+	// Verify document instructs Claude to update functional.md.
+	if !strings.Contains(captured, "Functional Specification Updates") {
+		t.Error("document missing Functional Specification Updates section")
+	}
 }
 
 func TestVerifyClaudeFailure(t *testing.T) {
