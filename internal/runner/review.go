@@ -86,6 +86,17 @@ func (r *Runner) Review(taskName string) error {
 		}
 	}
 
+	// Rebase onto latest remote main if requested.
+	if r.Rebase {
+		conflictFiles, err := r.attemptRebase(taskRepo)
+		if err != nil {
+			return fmt.Errorf("rebasing onto main: %w", err)
+		}
+		if len(conflictFiles) > 0 {
+			return fmt.Errorf("rebase conflicts — resolve manually before reviewing: %v", conflictFiles)
+		}
+	}
+
 	// Assemble a review-focused document.
 	content, err := task.Content()
 	if err != nil {

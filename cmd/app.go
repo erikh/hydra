@@ -928,6 +928,11 @@ func reviewCommand() *cli.Command {
 						Name:  "model",
 						Usage: "Override the Claude model",
 					},
+					&cli.BoolFlag{
+						Name:    "rebase",
+						Aliases: []string{"r"},
+						Usage:   "Rebase onto origin/main before reviewing",
+					},
 				},
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
@@ -948,6 +953,7 @@ func reviewCommand() *cli.Command {
 					if m := c.String("model"); m != "" {
 						r.Model = m
 					}
+					r.Rebase = c.Bool("rebase")
 					return r.Review(c.Args().Get(0))
 				},
 			},
@@ -1016,6 +1022,11 @@ func testCommand() *cli.Command {
 				Name:  "model",
 				Usage: "Override the Claude model",
 			},
+			&cli.BoolFlag{
+				Name:    "rebase",
+				Aliases: []string{"r"},
+				Usage:   "Rebase onto origin/main before testing",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() != 1 {
@@ -1038,6 +1049,7 @@ func testCommand() *cli.Command {
 			if m := c.String("model"); m != "" {
 				r.Model = m
 			}
+			r.Rebase = c.Bool("rebase")
 
 			return r.Test(c.Args().Get(0))
 		},

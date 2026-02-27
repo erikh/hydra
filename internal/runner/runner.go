@@ -39,6 +39,7 @@ type Runner struct {
 	Model       string            // model name override
 	AutoAccept  bool              // auto-accept all tool calls
 	PlanMode    bool              // start Claude in plan mode
+	Rebase      bool               // rebase onto origin/main before running
 	IssueCloser issues.Closer     // set by merge workflow
 }
 
