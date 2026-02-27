@@ -309,6 +309,11 @@ func runCommand() *cli.Command {
 				Aliases: []string{"P"},
 				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 			},
+			&cli.BoolFlag{
+				Name:    "no-notify",
+				Aliases: []string{"N"},
+				Usage:   "Disable desktop notifications when confirmation is needed",
+			},
 			&cli.StringFlag{
 				Name:  "model",
 				Usage: "Override the Claude model",
@@ -331,11 +336,15 @@ func runCommand() *cli.Command {
 
 			r.AutoAccept = true
 			r.PlanMode = true
+			r.Notify = true
 			if c.Bool("no-auto-accept") {
 				r.AutoAccept = false
 			}
 			if c.Bool("no-plan") {
 				r.PlanMode = false
+			}
+			if c.Bool("no-notify") {
+				r.Notify = false
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m
@@ -398,6 +407,11 @@ func groupCommand() *cli.Command {
 						Aliases: []string{"P"},
 						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 					},
+					&cli.BoolFlag{
+						Name:    "no-notify",
+						Aliases: []string{"N"},
+						Usage:   "Disable desktop notifications when confirmation is needed",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -413,11 +427,15 @@ func groupCommand() *cli.Command {
 					}
 					r.AutoAccept = true
 					r.PlanMode = true
+					r.Notify = true
 					if c.Bool("no-auto-accept") {
 						r.AutoAccept = false
 					}
 					if c.Bool("no-plan") {
 						r.PlanMode = false
+					}
+					if c.Bool("no-notify") {
+						r.Notify = false
 					}
 					if m := c.String("model"); m != "" {
 						r.Model = m
@@ -444,6 +462,11 @@ func groupCommand() *cli.Command {
 						Aliases: []string{"P"},
 						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 					},
+					&cli.BoolFlag{
+						Name:    "no-notify",
+						Aliases: []string{"N"},
+						Usage:   "Disable desktop notifications when confirmation is needed",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -459,11 +482,15 @@ func groupCommand() *cli.Command {
 					}
 					r.AutoAccept = true
 					r.PlanMode = true
+					r.Notify = true
 					if c.Bool("no-auto-accept") {
 						r.AutoAccept = false
 					}
 					if c.Bool("no-plan") {
 						r.PlanMode = false
+					}
+					if c.Bool("no-notify") {
+						r.Notify = false
 					}
 					if m := c.String("model"); m != "" {
 						r.Model = m
@@ -798,6 +825,11 @@ func stateCommand(name, usage, description, runUsage string, states []design.Tas
 						Aliases: []string{"P"},
 						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 					},
+					&cli.BoolFlag{
+						Name:    "no-notify",
+						Aliases: []string{"N"},
+						Usage:   "Disable desktop notifications when confirmation is needed",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -813,11 +845,15 @@ func stateCommand(name, usage, description, runUsage string, states []design.Tas
 					}
 					r.AutoAccept = true
 					r.PlanMode = true
+					r.Notify = true
 					if c.Bool("no-auto-accept") {
 						r.AutoAccept = false
 					}
 					if c.Bool("no-plan") {
 						r.PlanMode = false
+					}
+					if c.Bool("no-notify") {
+						r.Notify = false
 					}
 					if m := c.String("model"); m != "" {
 						r.Model = m
@@ -924,6 +960,11 @@ func reviewCommand() *cli.Command {
 						Aliases: []string{"P"},
 						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 					},
+					&cli.BoolFlag{
+						Name:    "no-notify",
+						Aliases: []string{"N"},
+						Usage:   "Disable desktop notifications when confirmation is needed",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -944,11 +985,15 @@ func reviewCommand() *cli.Command {
 					}
 					r.AutoAccept = true
 					r.PlanMode = true
+					r.Notify = true
 					if c.Bool("no-auto-accept") {
 						r.AutoAccept = false
 					}
 					if c.Bool("no-plan") {
 						r.PlanMode = false
+					}
+					if c.Bool("no-notify") {
+						r.Notify = false
 					}
 					if m := c.String("model"); m != "" {
 						r.Model = m
@@ -1018,6 +1063,11 @@ func testCommand() *cli.Command {
 				Aliases: []string{"P"},
 				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 			},
+			&cli.BoolFlag{
+				Name:    "no-notify",
+				Aliases: []string{"N"},
+				Usage:   "Disable desktop notifications when confirmation is needed",
+			},
 			&cli.StringFlag{
 				Name:  "model",
 				Usage: "Override the Claude model",
@@ -1040,11 +1090,15 @@ func testCommand() *cli.Command {
 
 			r.AutoAccept = true
 			r.PlanMode = true
+			r.Notify = true
 			if c.Bool("no-auto-accept") {
 				r.AutoAccept = false
 			}
 			if c.Bool("no-plan") {
 				r.PlanMode = false
+			}
+			if c.Bool("no-notify") {
+				r.Notify = false
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m
@@ -1113,6 +1167,11 @@ func reconcileCommand() *cli.Command {
 				Aliases: []string{"P"},
 				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 			},
+			&cli.BoolFlag{
+				Name:    "no-notify",
+				Aliases: []string{"N"},
+				Usage:   "Disable desktop notifications when confirmation is needed",
+			},
 			&cli.StringFlag{
 				Name:  "model",
 				Usage: "Override the Claude model",
@@ -1126,11 +1185,15 @@ func reconcileCommand() *cli.Command {
 
 			r.AutoAccept = true
 			r.PlanMode = true
+			r.Notify = true
 			if c.Bool("no-auto-accept") {
 				r.AutoAccept = false
 			}
 			if c.Bool("no-plan") {
 				r.PlanMode = false
+			}
+			if c.Bool("no-notify") {
+				r.Notify = false
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m
@@ -1158,6 +1221,11 @@ func verifyCommand() *cli.Command {
 				Aliases: []string{"P"},
 				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
 			},
+			&cli.BoolFlag{
+				Name:    "no-notify",
+				Aliases: []string{"N"},
+				Usage:   "Disable desktop notifications when confirmation is needed",
+			},
 			&cli.StringFlag{
 				Name:  "model",
 				Usage: "Override the Claude model",
@@ -1171,11 +1239,15 @@ func verifyCommand() *cli.Command {
 
 			r.AutoAccept = true
 			r.PlanMode = true
+			r.Notify = true
 			if c.Bool("no-auto-accept") {
 				r.AutoAccept = false
 			}
 			if c.Bool("no-plan") {
 				r.PlanMode = false
+			}
+			if c.Bool("no-notify") {
+				r.Notify = false
 			}
 			if m := c.String("model"); m != "" {
 				r.Model = m

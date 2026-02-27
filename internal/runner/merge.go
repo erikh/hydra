@@ -71,7 +71,7 @@ func (r *Runner) Merge(taskName string) error {
 	content, _ := task.Content()
 	cmds := r.commandsMap(wd)
 	sign := taskRepo.HasSigningKey()
-	doc := assembleMergeDocument(content, conflictFiles, cmds, sign, r.timeout())
+	doc := assembleMergeDocument(content, conflictFiles, cmds, sign, r.timeout(), r.Notify)
 
 	// Run before hook.
 	if err := r.runBeforeHook(wd); err != nil {
@@ -151,7 +151,7 @@ func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
 // assembleMergeDocument builds a single comprehensive document for the merge
 // workflow. It covers conflict resolution (if needed), test/lint verification,
 // commit message validation, and test coverage — all in one Claude session.
-func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool, timeout time.Duration) string {
+func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool, timeout time.Duration, notify bool) string {
 	var b strings.Builder
 
 	b.WriteString("# Merge Workflow\n\n")
@@ -203,6 +203,9 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 	b.WriteString(verificationSection(cmds))
 	b.WriteString(commitInstructions(sign, cmds))
 	b.WriteString(timeoutSection(timeout))
+	if notify {
+		b.WriteString(notificationSection())
+	}
 	b.WriteString(missionReminder())
 
 	return b.String()

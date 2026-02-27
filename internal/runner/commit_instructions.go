@@ -90,6 +90,16 @@ func commitInstructions(sign bool, commands map[string]string) string {
 	return b.String()
 }
 
+// notificationSection returns a markdown section instructing Claude to send
+// a desktop notification whenever it needs user confirmation or attention.
+func notificationSection() string {
+	return "\n\n# Desktop Notifications\n\n" +
+		"Whenever you need user confirmation, approval, or attention — such as presenting " +
+		"a plan for review, encountering an error you cannot resolve, or reaching a decision " +
+		"point — run `notify-send 'Hydra' '<brief description of what needs attention>'` " +
+		"to alert the user via a desktop notification.\n"
+}
+
 // missionReminder returns a closing section that reinforces task focus.
 func missionReminder() string {
 	return "\n\n# Reminder\n\n" +

@@ -41,6 +41,7 @@ type Runner struct {
 	AutoAccept  bool              // auto-accept all tool calls
 	PlanMode    bool              // start Claude in plan mode
 	Rebase      bool               // rebase onto origin/main before running
+	Notify      bool              // send desktop notifications on confirmation
 	IssueCloser issues.Closer     // set by merge workflow
 }
 
@@ -235,6 +236,9 @@ func (r *Runner) Run(taskName string) error {
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 	doc += timeoutSection(r.timeout())
+	if r.Notify {
+		doc += notificationSection()
+	}
 	doc += missionReminder()
 
 	// Run before hook.

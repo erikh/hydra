@@ -114,6 +114,9 @@ func (r *Runner) Review(taskName string) error {
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
 	doc += timeoutSection(r.timeout())
+	if r.Notify {
+		doc += notificationSection()
+	}
 	doc += missionReminder()
 
 	// Run before hook.
