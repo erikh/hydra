@@ -22,6 +22,7 @@ import (
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
 	"github.com/erikh/hydra/internal/lock"
+	"github.com/erikh/hydra/internal/notify"
 	"github.com/erikh/hydra/internal/repo"
 	"github.com/erikh/hydra/internal/runner"
 	"github.com/erikh/hydra/internal/tui"
@@ -63,6 +64,7 @@ func NewApp() *cli.App {
 			listCommand(),
 			milestoneCommand(),
 			syncCommand(),
+			notifyCommand(),
 			completionCommand(),
 		},
 	}
@@ -1286,6 +1288,47 @@ func fixCommand() *cli.Command {
 				return err
 			}
 			return r.Fix(c.Bool("yes"))
+		},
+	}
+}
+
+func notifyCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "notify",
+		Usage:     "Send a desktop notification",
+		ArgsUsage: "<message>",
+		Description: "Sends a desktop notification with the given message. " +
+			"If a notify command is configured in hydra.yml, it is executed with " +
+			"the title and message as arguments. Otherwise, uses the platform's " +
+			"native notification API (D-Bus on Linux, osascript on macOS).\n\n" +
+			"Used by Claude during task runs to alert the user when input is needed.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "title",
+				Aliases: []string{"t"},
+				Usage:   "Notification title (defaults to 'hydra')",
+				Value:   "hydra",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			if c.NArg() < 1 {
+				return errors.New("usage: hydra notify <message>")
+			}
+			message := strings.Join(c.Args().Slice(), " ")
+			title := c.String("title")
+
+			// Check for custom notify command in hydra.yml.
+			cfg, err := config.Discover()
+			if err == nil {
+				r, rErr := runner.New(cfg)
+				if rErr == nil && r.TaskRunner != nil {
+					if handled, nErr := r.TaskRunner.RunNotify(title, message); handled {
+						return nErr
+					}
+				}
+			}
+
+			return notify.Send(title, message)
 		},
 	}
 }

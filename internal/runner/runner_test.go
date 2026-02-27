@@ -2294,8 +2294,8 @@ func TestNotificationSection(t *testing.T) {
 	if !strings.Contains(result, "Desktop Notifications") {
 		t.Error("notification section missing heading")
 	}
-	if !strings.Contains(result, "send a desktop notification") {
-		t.Error("notification section missing notification instruction")
+	if !strings.Contains(result, "hydra notify") {
+		t.Error("notification section missing hydra notify command")
 	}
 	if !strings.Contains(result, "confirmation") {
 		t.Error("notification section missing confirmation context")

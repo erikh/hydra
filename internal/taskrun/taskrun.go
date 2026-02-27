@@ -40,6 +40,7 @@ type Commands struct {
 	APIType  string            `yaml:"api_type"`
 	GiteaURL string            `yaml:"gitea_url"`
 	Timeout  *Duration         `yaml:"timeout"`
+	Notify   string            `yaml:"notify"`
 	Commands map[string]string `yaml:"commands"`
 }
 
@@ -148,6 +149,28 @@ func (c *Commands) EffectiveCommands(workDir string) map[string]string {
 func (c *Commands) HasCommand(name, workDir string) bool {
 	_, ok := c.resolveCommand(name, workDir)
 	return ok
+}
+
+// RunNotify executes the configured notify command with title and message as arguments.
+// Returns false if no notify command is configured.
+func (c *Commands) RunNotify(title, message string) (bool, error) {
+	if strings.TrimSpace(c.Notify) == "" {
+		return false, nil
+	}
+
+	cmd := exec.CommandContext(context.Background(), userShell(), "-c", c.Notify+" "+shellQuote(title)+" "+shellQuote(message)) //nolint:gosec // commands from trusted config
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return true, fmt.Errorf("notify command failed: %w", err)
+	}
+	return true, nil
+}
+
+// shellQuote wraps a string in single quotes for safe shell usage.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // Run executes the named command in the given working directory.
