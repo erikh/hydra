@@ -76,6 +76,7 @@ func (r *Runner) Test(taskName string) error {
 	sign := taskRepo.HasSigningKey()
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+	doc += timeoutSection(r.timeout())
 	doc += missionReminder()
 
 	// Run before hook.

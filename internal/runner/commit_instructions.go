@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // verificationSection returns a markdown section listing the test and lint
@@ -95,6 +96,18 @@ func missionReminder() string {
 		"Your ONLY job is the task described in the document above. " +
 		"Do not make unrelated changes, refactor other code, or work on anything " +
 		"outside the scope of the task. Stay focused on the mission.\n"
+}
+
+// timeoutSection returns a markdown section instructing Claude to complete
+// within the given timeout. Returns empty string if timeout is zero.
+func timeoutSection(timeout time.Duration) string {
+	if timeout <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n\n# Time Limit\n\n"+
+		"You have %s to complete this task. "+
+		"If you are running low on time, commit whatever progress you have made so far "+
+		"and stop. A partial commit that builds and passes tests is better than no commit at all.\n", timeout)
 }
 
 // stepPrefix returns a numbered step prefix like "1. ", "2. ", etc.

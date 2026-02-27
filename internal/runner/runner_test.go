@@ -1295,7 +1295,7 @@ func TestMergeDocumentExclusiveCommands(t *testing.T) {
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false)
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0)
 
 	if !strings.Contains(result, "Do NOT run any individual test") {
 		t.Error("missing individual test prohibition in merge document")
@@ -2161,7 +2161,7 @@ func TestMergeDocumentWithConflicts(t *testing.T) {
 		"lint": "golangci-lint run",
 	}
 	conflictFiles := []string{"main.go", "config.go"}
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false)
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0)
 
 	// Verify conflict section is present.
 	if !strings.Contains(result, "Conflict Resolution") {

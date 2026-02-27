@@ -10,15 +10,36 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v4"
 )
+
+// Duration wraps time.Duration for YAML unmarshaling from Go duration strings.
+type Duration struct {
+	time.Duration
+}
+
+// UnmarshalYAML parses a Go duration string like "30m" or "2h".
+func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
+	var s string
+	if err := node.Decode(&s); err != nil {
+		return err
+	}
+	parsed, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	d.Duration = parsed
+	return nil
+}
 
 // Commands holds the named commands loaded from hydra.yml.
 type Commands struct {
 	Model    string            `yaml:"model"`
 	APIType  string            `yaml:"api_type"`
 	GiteaURL string            `yaml:"gitea_url"`
+	Timeout  *Duration         `yaml:"timeout"`
 	Commands map[string]string `yaml:"commands"`
 }
 

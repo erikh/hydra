@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
@@ -83,6 +84,14 @@ func (r *Runner) loadHydraYml(cfg *config.Config) error {
 
 	r.resolveIssueCloser(cfg.SourceRepoURL, cmds.APIType, cmds.GiteaURL)
 	return nil
+}
+
+// timeout returns the configured task timeout, or zero if none is set.
+func (r *Runner) timeout() time.Duration {
+	if r.TaskRunner != nil && r.TaskRunner.Timeout != nil {
+		return r.TaskRunner.Timeout.Duration
+	}
+	return 0
 }
 
 // resolveIssueCloser attempts to set the issue closer from the source URL.
@@ -225,6 +234,7 @@ func (r *Runner) Run(taskName string) error {
 	cmds := r.commandsMap(wd)
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+	doc += timeoutSection(r.timeout())
 	doc += missionReminder()
 
 	// Run before hook.

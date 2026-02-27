@@ -113,6 +113,7 @@ func (r *Runner) Review(taskName string) error {
 	cmds := r.commandsMap(wd)
 	doc += verificationSection(cmds)
 	doc += commitInstructions(sign, cmds)
+	doc += timeoutSection(r.timeout())
 	doc += missionReminder()
 
 	// Run before hook.
