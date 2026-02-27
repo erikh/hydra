@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 
 	"github.com/alecthomas/chroma/v2"
@@ -55,6 +56,8 @@ func NewApp() *cli.App {
 			testCommand(),
 			cleanCommand(),
 			mergeCommand(),
+			reconcileCommand(),
+			verifyCommand(),
 			statusCommand(),
 			listCommand(),
 			milestoneCommand(),
@@ -1044,6 +1047,96 @@ func mergeCommand() *cli.Command {
 	)
 }
 
+func reconcileCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "reconcile",
+		Usage: "Merge completed tasks into functional.md and clean up",
+		Description: "Reads all completed task documents, uses Claude to synthesize " +
+			"their requirements into functional.md, then removes the completed task files.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "no-auto-accept",
+				Aliases: []string{"Y"},
+				Usage:   "Disable auto-accept (prompt for each tool call)",
+			},
+			&cli.BoolFlag{
+				Name:    "no-plan",
+				Aliases: []string{"P"},
+				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "Override the Claude model",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			r, err := newRunner()
+			if err != nil {
+				return err
+			}
+
+			r.AutoAccept = true
+			r.PlanMode = true
+			if c.Bool("no-auto-accept") {
+				r.AutoAccept = false
+			}
+			if c.Bool("no-plan") {
+				r.PlanMode = false
+			}
+			if m := c.String("model"); m != "" {
+				r.Model = m
+			}
+
+			return r.Reconcile()
+		},
+	}
+}
+
+func verifyCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "verify",
+		Usage: "Verify all functional.md requirements against the codebase",
+		Description: "Uses Claude to check that every requirement in functional.md " +
+			"is implemented and tests pass on the current main branch.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "no-auto-accept",
+				Aliases: []string{"Y"},
+				Usage:   "Disable auto-accept (prompt for each tool call)",
+			},
+			&cli.BoolFlag{
+				Name:    "no-plan",
+				Aliases: []string{"P"},
+				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "Override the Claude model",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			r, err := newRunner()
+			if err != nil {
+				return err
+			}
+
+			r.AutoAccept = true
+			r.PlanMode = true
+			if c.Bool("no-auto-accept") {
+				r.AutoAccept = false
+			}
+			if c.Bool("no-plan") {
+				r.PlanMode = false
+			}
+			if m := c.String("model"); m != "" {
+				r.Model = m
+			}
+
+			return r.Verify()
+		},
+	}
+}
+
 // parseRunningTask splits a raw lock name like "review:foo" into
 // a display state ("reviewing") and the task name ("foo").
 func parseRunningTask(name string) (state, task string) {
@@ -1064,10 +1157,241 @@ func parseRunningTask(name string) (state, task string) {
 func milestoneCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "milestone",
-		Usage: "List milestone targets and historical scores",
-		Description: "Lists milestone targets from the milestone/ directory and historical " +
-			"milestone scores from milestone/history/. Milestones are date-based markdown " +
-			"files; history entries include a letter grade (A-F).",
+		Usage: "Manage milestones and their promises",
+		Description: "Create, edit, list, verify, repair, and deliver milestones. " +
+			"Each milestone is a date-based markdown file where ## headings are promises. " +
+			"Hydra creates tasks for each promise and tracks their completion.",
+		Subcommands: []*cli.Command{
+			milestoneCreateCommand(),
+			milestoneEditCommand(),
+			milestoneListCommand(),
+			milestoneVerifyCommand(),
+			milestoneRepairCommand(),
+			milestoneDeliverCommand(),
+		},
+	}
+}
+
+func milestoneCreateCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "create",
+		Usage:     "Create a new milestone",
+		ArgsUsage: "[date]",
+		Description: "Creates a new milestone. If a date argument is given (YYYY-MM-DD), uses it; " +
+			"otherwise reads the date from stdin. Opens the editor with a template, then " +
+			"creates task files for each promise (## heading).",
+		Action: func(c *cli.Context) error {
+			cfg, err := config.Discover()
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			var dateInput string
+			if c.NArg() > 0 {
+				dateInput = c.Args().Get(0)
+			} else {
+				fmt.Print("Milestone date (YYYY-MM-DD): ")
+				if _, err := fmt.Scanln(&dateInput); err != nil {
+					return errors.New("no date provided")
+				}
+			}
+
+			date, err := design.NormalizeDate(dateInput)
+			if err != nil {
+				return err
+			}
+
+			editor, err := resolveEditor()
+			if err != nil {
+				return err
+			}
+
+			// Write template to temp file and open editor.
+			tmpFile, err := os.CreateTemp("", "hydra-milestone-*.md")
+			if err != nil {
+				return fmt.Errorf("creating temp file: %w", err)
+			}
+			tmpPath := tmpFile.Name()
+			if _, err := tmpFile.WriteString(design.MilestoneTemplate); err != nil {
+				_ = tmpFile.Close()
+				_ = os.Remove(tmpPath)
+				return fmt.Errorf("writing template: %w", err)
+			}
+			_ = tmpFile.Close()
+			defer func() { _ = os.Remove(tmpPath) }()
+
+			if err := design.RunEditorOnFile(editor, tmpPath, os.Stdin, os.Stdout, os.Stderr); err != nil {
+				return err
+			}
+
+			content, err := os.ReadFile(tmpPath) //nolint:gosec // path is from our own temp file
+			if err != nil {
+				return fmt.Errorf("reading temp file: %w", err)
+			}
+
+			if len(strings.TrimSpace(string(content))) == 0 {
+				return errors.New("empty milestone, aborting")
+			}
+
+			dd, err := design.NewDir(cfg.DesignDir)
+			if err != nil {
+				return err
+			}
+
+			m, err := dd.CreateMilestone(date, string(content))
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Created milestone %s\n", m.Date)
+
+			// Create initial task files.
+			result, err := dd.RepairMilestone(m)
+			if err != nil {
+				return fmt.Errorf("creating tasks: %w", err)
+			}
+
+			for _, slug := range result.Created {
+				fmt.Printf("  Created task: %s/%s\n", design.MilestoneTaskGroup(date), slug)
+			}
+
+			return nil
+		},
+	}
+}
+
+func milestoneEditCommand() *cli.Command {
+	return &cli.Command{
+		Name:         "edit",
+		Usage:        "Edit an existing milestone",
+		ArgsUsage:    "<date>",
+		BashComplete: completeMilestones,
+		Description:  "Opens the milestone file for the given date in your editor.",
+		Action: func(c *cli.Context) error {
+			if c.NArg() != 1 {
+				return errors.New("usage: hydra milestone edit <date>")
+			}
+
+			cfg, err := config.Discover()
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			dd, err := design.NewDir(cfg.DesignDir)
+			if err != nil {
+				return err
+			}
+
+			date := c.Args().Get(0)
+			m, err := dd.FindMilestone(date)
+			if err != nil {
+				return err
+			}
+
+			editor, err := resolveEditor()
+			if err != nil {
+				return err
+			}
+
+			return design.RunEditorOnFile(editor, m.FilePath, os.Stdin, os.Stdout, os.Stderr)
+		},
+	}
+}
+
+func milestoneListCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "list",
+		Usage: "List milestones",
+		Description: "Lists outstanding (undelivered) milestones, delivered milestones, " +
+			"and historical scores. Use --outstanding to show only undelivered milestones.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "outstanding",
+				Usage: "Show only undelivered milestones",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			cfg, err := config.Discover()
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			dd, err := design.NewDir(cfg.DesignDir)
+			if err != nil {
+				return err
+			}
+
+			milestones, err := dd.Milestones()
+			if err != nil {
+				return err
+			}
+
+			if c.Bool("outstanding") {
+				if len(milestones) == 0 {
+					fmt.Println("No outstanding milestones.")
+					return nil
+				}
+				for _, m := range milestones {
+					fmt.Println(m.Date)
+				}
+				return nil
+			}
+
+			any := false
+
+			if len(milestones) > 0 {
+				any = true
+				fmt.Println("Outstanding:")
+				for _, m := range milestones {
+					fmt.Printf("  - %s\n", m.Date)
+				}
+				fmt.Println()
+			}
+
+			delivered, err := dd.DeliveredMilestones()
+			if err != nil {
+				return err
+			}
+
+			if len(delivered) > 0 {
+				any = true
+				fmt.Println("Delivered:")
+				for _, m := range delivered {
+					fmt.Printf("  - %s\n", m.Date)
+				}
+				fmt.Println()
+			}
+
+			history, err := dd.MilestoneHistory()
+			if err != nil {
+				return err
+			}
+
+			if len(history) > 0 {
+				any = true
+				fmt.Println("History:")
+				for _, h := range history {
+					fmt.Printf("  - %s [%s]\n", h.Date, h.Score)
+				}
+				fmt.Println()
+			}
+
+			if !any {
+				fmt.Println("No milestones found.")
+			}
+
+			return nil
+		},
+	}
+}
+
+func milestoneVerifyCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "verify",
+		Usage: "Verify outstanding milestones",
+		Description: "Checks all undelivered milestones with a date on or before today. " +
+			"For each, verifies that all promises have completed tasks. " +
+			"Milestones where all promises are kept are automatically marked as delivered.",
 		Action: func(_ *cli.Context) error {
 			cfg, err := config.Discover()
 			if err != nil {
@@ -1084,31 +1408,144 @@ func milestoneCommand() *cli.Command {
 				return err
 			}
 
-			if len(milestones) > 0 {
-				fmt.Println("Milestones:")
-				for _, m := range milestones {
-					fmt.Printf("  - %s\n", m.Date)
+			today := time.Now().Format("2006-01-02")
+			found := false
+
+			for _, m := range milestones {
+				if m.Date > today {
+					continue
+				}
+				found = true
+
+				result, err := dd.VerifyMilestone(&m)
+				if err != nil {
+					return err
+				}
+
+				fmt.Printf("Milestone %s:\n", result.Date)
+
+				if result.AllKept {
+					fmt.Println("  All promises kept!")
+					if err := dd.DeliverMilestone(&m); err != nil {
+						return err
+					}
+					fmt.Println("  (automatically delivered)")
+				} else {
+					if len(result.Missing) > 0 {
+						fmt.Println("  Missing tasks:")
+						for _, s := range result.Missing {
+							fmt.Printf("    - %s\n", s)
+						}
+					}
+					if len(result.Incomplete) > 0 {
+						fmt.Println("  Incomplete tasks:")
+						for _, s := range result.Incomplete {
+							fmt.Printf("    - %s\n", s)
+						}
+					}
 				}
 				fmt.Println()
 			}
 
-			history, err := dd.MilestoneHistory()
+			if !found {
+				fmt.Println("No milestones due for verification.")
+			}
+
+			return nil
+		},
+	}
+}
+
+func milestoneRepairCommand() *cli.Command {
+	return &cli.Command{
+		Name:         "repair",
+		Usage:        "Create missing task files for a milestone",
+		ArgsUsage:    "<date>",
+		BashComplete: completeMilestones,
+		Description: "Parses the milestone's promises and creates task files for any " +
+			"promise that doesn't have a corresponding task.",
+		Action: func(c *cli.Context) error {
+			if c.NArg() != 1 {
+				return errors.New("usage: hydra milestone repair <date>")
+			}
+
+			cfg, err := config.Discover()
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			dd, err := design.NewDir(cfg.DesignDir)
 			if err != nil {
 				return err
 			}
 
-			if len(history) > 0 {
-				fmt.Println("History:")
-				for _, h := range history {
-					fmt.Printf("  - %s [%s]\n", h.Date, h.Score)
+			date := c.Args().Get(0)
+			m, err := dd.FindMilestone(date)
+			if err != nil {
+				return err
+			}
+
+			result, err := dd.RepairMilestone(m)
+			if err != nil {
+				return err
+			}
+
+			group := design.MilestoneTaskGroup(date)
+
+			if len(result.Created) > 0 {
+				fmt.Println("Created:")
+				for _, s := range result.Created {
+					fmt.Printf("  - %s/%s\n", group, s)
 				}
-				fmt.Println()
+			}
+			if len(result.Skipped) > 0 {
+				fmt.Println("Skipped (already exist):")
+				for _, s := range result.Skipped {
+					fmt.Printf("  - %s/%s\n", group, s)
+				}
+			}
+			if len(result.Created) == 0 && len(result.Skipped) == 0 {
+				fmt.Println("No promises found in milestone.")
 			}
 
-			if len(milestones) == 0 && len(history) == 0 {
-				fmt.Println("No milestones found.")
+			return nil
+		},
+	}
+}
+
+func milestoneDeliverCommand() *cli.Command {
+	return &cli.Command{
+		Name:         "deliver",
+		Usage:        "Mark a milestone as delivered",
+		ArgsUsage:    "<date>",
+		BashComplete: completeMilestones,
+		Description:  "Moves a milestone to the delivered directory.",
+		Action: func(c *cli.Context) error {
+			if c.NArg() != 1 {
+				return errors.New("usage: hydra milestone deliver <date>")
 			}
 
+			cfg, err := config.Discover()
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			dd, err := design.NewDir(cfg.DesignDir)
+			if err != nil {
+				return err
+			}
+
+			date := c.Args().Get(0)
+			m, err := dd.FindMilestone(date)
+			if err != nil {
+				return err
+			}
+
+			if err := dd.DeliverMilestone(m); err != nil {
+				return err
+			}
+
+			fmt.Printf("Delivered milestone %s\n", date)
 			return nil
 		},
 	}

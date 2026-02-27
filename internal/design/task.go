@@ -207,3 +207,8 @@ func (d *Dir) MoveTask(task *Task, newState TaskState) error {
 	task.State = newState
 	return nil
 }
+
+// DeleteTask removes a task file from disk.
+func (d *Dir) DeleteTask(task *Task) error {
+	return os.Remove(task.FilePath)
+}

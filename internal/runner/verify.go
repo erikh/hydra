@@ -1,0 +1,115 @@
+package runner
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Verify uses Claude to verify that all items in functional.md are satisfied
+// by the current codebase.
+func (r *Runner) Verify() error {
+	baseDir := r.BaseDir
+	if baseDir == "" {
+		baseDir = "."
+	}
+
+	// Read functional.md.
+	functional, err := r.Design.Functional()
+	if err != nil {
+		return fmt.Errorf("reading functional.md: %w", err)
+	}
+	if strings.TrimSpace(functional) == "" {
+		return errors.New("functional.md is empty; nothing to verify")
+	}
+
+	// Prepare work directory.
+	wd := filepath.Join(baseDir, "work", "_verify")
+	_, err = r.prepareRepo(wd)
+	if err != nil {
+		return fmt.Errorf("preparing work directory: %w", err)
+	}
+
+	// Run before hook.
+	if err := r.runBeforeHook(wd); err != nil {
+		return fmt.Errorf("before hook: %w", err)
+	}
+
+	// Assemble document.
+	cmds := r.commandsMap(wd)
+	doc := assembleVerifyDocument(functional, cmds)
+
+	// Invoke Claude.
+	claudeFn := r.Claude
+	if claudeFn == nil {
+		claudeFn = invokeClaude
+	}
+	err = claudeFn(context.Background(), ClaudeRunConfig{
+		RepoDir:    wd,
+		Document:   doc,
+		Model:      r.Model,
+		AutoAccept: r.AutoAccept,
+		PlanMode:   r.PlanMode,
+	})
+	if err != nil {
+		return fmt.Errorf("claude failed: %w", err)
+	}
+
+	// Check for verify-passed.txt or verify-failed.txt.
+	passedPath := filepath.Join(wd, "verify-passed.txt")
+	failedPath := filepath.Join(wd, "verify-failed.txt")
+
+	if _, err := os.Stat(passedPath); err == nil {
+		fmt.Println("All functional requirements verified.")
+		return nil
+	}
+
+	if _, err := os.Stat(failedPath); err == nil {
+		data, readErr := os.ReadFile(failedPath) //nolint:gosec // path is constructed from our own work dir
+		if readErr != nil {
+			return fmt.Errorf("reading verify-failed.txt: %w", readErr)
+		}
+		fmt.Println("Verification failed:")
+		fmt.Println(string(data))
+		return errors.New("functional requirements verification failed")
+	}
+
+	return errors.New("claude did not produce verify-passed.txt or verify-failed.txt")
+}
+
+// assembleVerifyDocument builds the prompt for the verify workflow.
+func assembleVerifyDocument(functional string, cmds map[string]string) string {
+	var b strings.Builder
+
+	b.WriteString("# Mission\n\nYour sole objective is to verify that every requirement in the functional specification " +
+		"below is satisfied by the current codebase.\n\n")
+
+	b.WriteString("# Functional Specification\n\n")
+	b.WriteString(functional)
+	b.WriteString("\n\n")
+
+	b.WriteString("# Verification Instructions\n\n")
+	b.WriteString("For each requirement in the specification above:\n")
+	b.WriteString("1. Find the relevant code that implements it\n")
+	b.WriteString("2. Confirm the implementation matches the specification\n")
+	b.WriteString("3. Run the test suite to verify tests pass\n\n")
+
+	b.WriteString(verificationSection(cmds))
+
+	b.WriteString("\nIf ALL requirements are satisfied and all tests pass, create a file called " +
+		"`verify-passed.txt` containing \"PASS\" and nothing else.\n\n")
+
+	b.WriteString("If ANY requirement is NOT satisfied, create a file called `verify-failed.txt` " +
+		"listing each failed requirement and why it failed.\n\n")
+
+	b.WriteString("Do not modify any source code. Do not fix anything. Only verify and report.\n")
+
+	b.WriteString("\n# Reminder\n\n")
+	b.WriteString("Your ONLY job is to verify the functional requirements. " +
+		"Do not make any code changes. Only create verify-passed.txt or verify-failed.txt.\n")
+
+	return b.String()
+}

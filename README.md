@@ -69,6 +69,8 @@ design-dir/
 │   └── abandoned/                    # Abandoned tasks
 └── milestone/
     ├── {date}.md                     # Milestone target (e.g., 2025-06-01.md)
+    ├── delivered/                    # Milestones marked as delivered
+    │   └── {date}.md
     └── history/
         └── {date}-{grade}.md         # Historical score (e.g., 2025-06-01-B.md)
 ```
@@ -215,6 +217,39 @@ hydra merge run <task-name>        # Run merge workflow
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
+### `hydra reconcile`
+
+Reads all completed task documents, uses Claude to synthesize their requirements into `functional.md`, then removes the completed task files. This keeps `functional.md` as the project's living specification — a concise description of what the software does, organized by feature area rather than by task.
+
+The workflow:
+
+1. Collects all completed tasks from `state/completed/`
+2. Clones/syncs the source repo into `work/_reconcile/`
+3. Copies `functional.md` into the work directory for Claude to edit
+4. Opens a Claude session with the current functional spec, all completed task contents, and instructions to merge them
+5. Claude reads the codebase to understand what was actually implemented, then updates `functional.md`
+6. The updated `functional.md` is copied back to the design directory
+7. Completed task files are deleted
+
+If no completed tasks exist, the command exits with an error. If Claude fails, no tasks are deleted and `functional.md` is not modified.
+
+**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+
+### `hydra verify`
+
+Uses Claude to verify that every requirement in `functional.md` is satisfied by the current codebase. This is a read-only check — no source code is modified.
+
+The workflow:
+
+1. Reads `functional.md` (errors if empty)
+2. Clones/syncs the source repo into `work/_verify/`
+3. Opens a Claude session where Claude reads the code and runs tests
+4. Claude creates `verify-passed.txt` if all requirements are met, or `verify-failed.txt` listing failures
+
+If verification passes, prints a success message. If it fails, prints the failure details and exits with an error.
+
+**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+
 ### `hydra other`
 
 Manage miscellaneous files in the `other/` directory.
@@ -231,7 +266,7 @@ hydra other rm <name>      # Remove a file
 
 Imports open issues from GitHub or Gitea as task files under `tasks/issues/`. Existing issues (matched by number) are skipped. The API type is auto-detected from the source repo URL or can be set via `api_type` in `hydra.yml`.
 
-After importing, sync cleans up finished tasks: remote branches for completed and abandoned tasks are deleted, and associated issues are closed with a thank-you comment that includes the merge commit SHA.
+After importing, sync cleans up completed and abandoned tasks: remote feature branches are deleted and the corresponding issues are closed with a comment that includes the merge commit SHA.
 
 **Flags:** `--label` — Filter issues by label (repeatable)
 
@@ -254,7 +289,23 @@ When stdout is a TTY, output is syntax-highlighted using the active color theme.
 
 ### `hydra milestone`
 
-Lists milestone targets and historical scores with letter grades (A-F).
+Manage milestones and their promises. Each milestone is a date-based markdown file where `##` headings are promises. Hydra creates tasks for each promise and tracks their completion.
+
+```sh
+hydra milestone create [date]         # Create a new milestone (opens editor)
+hydra milestone edit <date>           # Edit an existing milestone
+hydra milestone list                  # List outstanding, delivered, and historical milestones
+hydra milestone list --outstanding    # List only undelivered milestones
+hydra milestone verify                # Verify due milestones (auto-delivers if all kept)
+hydra milestone repair <date>         # Create missing task files for promises
+hydra milestone deliver <date>        # Mark a milestone as delivered
+```
+
+`hydra milestone create` normalizes the date, opens your editor with a template, then creates task files under `tasks/milestone-{date}/` for each `##` heading.
+
+`hydra milestone verify` checks all undelivered milestones with a date on or before today. For each promise, it checks whether the corresponding task has reached the completed state. Milestones where all promises are kept are automatically marked as delivered.
+
+`hydra milestone repair` re-scans the milestone file and creates task files for any promises that don't have one yet. Existing tasks are left untouched.
 
 ### `hydra completion`
 
