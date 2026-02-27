@@ -1179,7 +1179,7 @@ func setTerminalTitle(c *cli.Context) {
 		return
 	}
 	args := c.Args().Slice()
-	if len(args) == 0 || args[0] == "completion" {
+	if len(args) == 0 || args[0] == "completion" || args[0] == "status" {
 		return
 	}
 	title := fmt.Sprintf("hydra %s [pid:%d]", strings.Join(args, " "), os.Getpid())
