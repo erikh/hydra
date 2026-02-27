@@ -52,6 +52,15 @@ func (r *Runner) Test(taskName string) error {
 		}
 	}
 
+	// Rebase onto latest remote main.
+	conflictFiles, err := r.attemptRebase(taskRepo)
+	if err != nil {
+		return fmt.Errorf("rebasing onto main: %w", err)
+	}
+	if len(conflictFiles) > 0 {
+		return fmt.Errorf("rebase conflicts — resolve manually before running tests: %v", conflictFiles)
+	}
+
 	// Assemble a test-focused document.
 	content, err := task.Content()
 	if err != nil {
