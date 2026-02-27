@@ -402,6 +402,11 @@ timeout: "1h"
 # built-in D-Bus/macOS notification.
 notify: "my-notify-script"
 
+# Teardown command. Run in a work directory before it is removed
+# (e.g., during re-clone or orphan cleanup). Use this to stop services,
+# release resources, or clean up external state tied to the work directory.
+teardown: "docker compose down"
+
 # Commands that Claude runs before committing.
 #
 # IMPORTANT: These commands may run concurrently across multiple hydra tasks,
@@ -419,6 +424,8 @@ commands:
 ```
 
 **`notify`** — An optional custom notification command. When set, `hydra notify` runs this command with the title and message as shell-quoted arguments (e.g., `my-notify-script 'hydra' 'Build failed'`) instead of using the built-in D-Bus (Linux) or Notification Center (macOS) integration.
+
+**`teardown`** — An optional command that runs in a work directory before it is removed. This is called when a work directory needs to be re-cloned (sync failure) or when `hydra fix` removes orphaned work directories. Use this for stopping services, releasing resources, or cleaning up external state tied to the work directory.
 
 **`timeout`** — An optional duration string (using Go duration syntax, e.g. `"30m"`, `"2h"`, `"1h30m"`) that sets a time limit for Claude sessions. When configured, Claude is instructed to commit any partial progress and stop gracefully if it is running low on time, rather than being killed mid-task.
 

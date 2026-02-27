@@ -414,11 +414,14 @@ func (r *Runner) collectOrphanedWorkDirs(dir string, leafDirs, parentDirs map[st
 			continue
 		}
 
-		// Not expected — schedule removal.
+		// Not expected — schedule teardown and removal.
 		p := entryPath // capture
 		actions = append(actions, fixAction{
 			description: fmt.Sprintf("remove orphaned work directory %s", p),
-			fix:         func() error { return os.RemoveAll(p) },
+			fix: func() error {
+				r.runTeardown(p)
+				return os.RemoveAll(p)
+			},
 		})
 	}
 

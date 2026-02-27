@@ -119,7 +119,7 @@ func (r *Runner) Review(taskName string) error {
 	doc += commitInstructions(sign, cmds)
 	doc += timeoutSection(r.timeout())
 	if r.Notify {
-		doc += notificationSection()
+		doc += notificationSection(r.notifyTitle(taskName))
 	}
 	doc += missionReminder()
 

@@ -91,7 +91,7 @@ func (r *Runner) Merge(taskName string) error {
 	content, _ := task.Content()
 	cmds := r.commandsMap(wd)
 	sign := taskRepo.HasSigningKey()
-	doc := assembleMergeDocument(content, conflictFiles, cmds, sign, r.timeout(), r.Notify)
+	doc := assembleMergeDocument(content, conflictFiles, cmds, sign, r.timeout(), r.Notify, r.notifyTitle(taskName))
 
 	// Run before hook.
 	if err := r.runBeforeHook(wd); err != nil {
@@ -172,7 +172,7 @@ func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
 // The calling tool handles all git orchestration (fetch, rebase, checkout, push).
 // Claude's job is limited to: resolving conflicts (if any), validating commits,
 // verifying test coverage, and running tests.
-func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool, timeout time.Duration, notify bool) string {
+func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool, timeout time.Duration, notify bool, notifyTitle string) string {
 	var b strings.Builder
 
 	b.WriteString("# Merge Workflow\n\n")
@@ -226,7 +226,7 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 	b.WriteString(commitInstructions(sign, cmds))
 	b.WriteString(timeoutSection(timeout))
 	if notify {
-		b.WriteString(notificationSection())
+		b.WriteString(notificationSection(notifyTitle))
 	}
 	b.WriteString(missionReminder())
 

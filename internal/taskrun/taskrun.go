@@ -41,6 +41,7 @@ type Commands struct {
 	GiteaURL string            `yaml:"gitea_url"`
 	Timeout  *Duration         `yaml:"timeout"`
 	Notify   string            `yaml:"notify"`
+	Teardown string            `yaml:"teardown"`
 	Commands map[string]string `yaml:"commands"`
 }
 
@@ -171,6 +172,24 @@ func (c *Commands) RunNotify(title, message string) (bool, error) {
 // shellQuote wraps a string in single quotes for safe shell usage.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// RunTeardown executes the configured teardown command in the given working directory.
+// Returns nil if no teardown command is configured.
+func (c *Commands) RunTeardown(workDir string) error {
+	if strings.TrimSpace(c.Teardown) == "" {
+		return nil
+	}
+
+	cmd := exec.CommandContext(context.Background(), userShell(), "-c", c.Teardown) //nolint:gosec // commands from trusted config
+	cmd.Dir = workDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("teardown command failed: %w", err)
+	}
+	return nil
 }
 
 // Run executes the named command in the given working directory.

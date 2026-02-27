@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/erikh/hydra/internal/config"
@@ -113,6 +115,23 @@ func (r *Runner) commandsMap(workDir string) map[string]string {
 	return nil
 }
 
+// notifyTitle returns a notification title like "repo: taskName".
+func (r *Runner) notifyTitle(taskName string) string {
+	repoName := path.Base(strings.TrimSuffix(r.Config.SourceRepoURL, ".git"))
+	return repoName + ": " + taskName
+}
+
+// runTeardown runs the "teardown" command from hydra.yml if configured.
+// This runs in a work directory before it is removed.
+func (r *Runner) runTeardown(workDir string) {
+	if r.TaskRunner == nil {
+		return
+	}
+	if err := r.TaskRunner.RunTeardown(workDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: teardown failed in %s: %v\n", workDir, err)
+	}
+}
+
 // runBeforeHook runs the "before" command from hydra.yml if configured.
 // This runs before every Claude invocation, after the repo is cloned/prepared.
 func (r *Runner) runBeforeHook(workDir string) error {
@@ -160,7 +179,8 @@ func (r *Runner) trySyncExisting(workDir string) (*repo.Repo, bool) {
 		fmt.Fprintf(os.Stderr, "Warning: resync of %s failed, re-cloning\n", workDir)
 	}
 
-	// Not a git repo or sync failed; remove it.
+	// Not a git repo or sync failed; teardown and remove it.
+	r.runTeardown(workDir)
 	_ = os.RemoveAll(workDir)
 	return nil, false
 }
@@ -248,7 +268,7 @@ func (r *Runner) Run(taskName string) error {
 	doc += commitInstructions(sign, cmds)
 	doc += timeoutSection(r.timeout())
 	if r.Notify {
-		doc += notificationSection()
+		doc += notificationSection(r.notifyTitle(taskName))
 	}
 	doc += missionReminder()
 

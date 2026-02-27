@@ -1296,7 +1296,7 @@ func TestMergeDocumentExclusiveCommands(t *testing.T) {
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
 
 	if !strings.Contains(result, "Do NOT run any individual test") {
 		t.Error("missing individual test prohibition in merge document")
@@ -2162,7 +2162,7 @@ func TestMergeDocumentWithConflicts(t *testing.T) {
 		"lint": "golangci-lint run",
 	}
 	conflictFiles := []string{"main.go", "config.go"}
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
 
 	// Verify conflict section is present.
 	if !strings.Contains(result, "Conflict Resolution") {
@@ -2290,7 +2290,7 @@ func TestTimeoutSectionWithDuration(t *testing.T) {
 }
 
 func TestNotificationSection(t *testing.T) {
-	result := notificationSection()
+	result := notificationSection("test: task")
 	if !strings.Contains(result, "Desktop Notifications") {
 		t.Error("notification section missing heading")
 	}
@@ -2421,7 +2421,7 @@ func TestMergeDocumentNoFetchInstruction(t *testing.T) {
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
 
 	// Fetch is handled by the tool, not by Claude.
 	if strings.Contains(result, "Fetch Remote") {
@@ -2437,7 +2437,7 @@ func TestMergeDocumentConflictResolutionReport(t *testing.T) {
 		"test": "go test ./...",
 	}
 	conflictFiles := []string{"main.go", "config.go"}
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
 
 	if !strings.Contains(result, "Conflict Resolution Report") {
 		t.Error("merge document missing Conflict Resolution Report section")
@@ -2452,7 +2452,7 @@ func TestMergeDocumentConflictInstructions(t *testing.T) {
 		"test": "go test ./...",
 	}
 	conflictFiles := []string{"main.go"}
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
 
 	// Claude should be told to rebase and resolve, but not to loop (tool handles that).
 	if !strings.Contains(result, "git rebase origin/main") {
@@ -2471,13 +2471,13 @@ func TestMergeDocumentIncludesNotification(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, true)
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0, true, "repo: task")
 
 	if !strings.Contains(result, "Desktop Notifications") {
 		t.Error("merge document missing notification section when notify=true")
 	}
 
-	result = assembleMergeDocument("Task content", nil, cmds, false, 0, false)
+	result = assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
 	if strings.Contains(result, "Desktop Notifications") {
 		t.Error("merge document should not contain notification section when notify=false")
 	}
@@ -2487,7 +2487,7 @@ func TestMergeDocumentIncludesTimeout(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 30*60*1e9, false)
+	result := assembleMergeDocument("Task content", nil, cmds, false, 30*60*1e9, false, "")
 
 	if !strings.Contains(result, "Time Limit") {
 		t.Error("merge document missing timeout section")
@@ -2702,7 +2702,7 @@ func TestMergeDocumentStayOnFeatureBranch(t *testing.T) {
 		"test": "go test ./...",
 	}
 
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
 
 	if !strings.Contains(result, "do NOT checkout main") {
 		t.Error("merge document missing instruction to not checkout main")
@@ -2724,7 +2724,7 @@ func TestMergeDocumentStayOnFeatureBranchWithConflicts(t *testing.T) {
 	}
 	conflictFiles := []string{"main.go"}
 
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
 
 	// Even with conflicts, Claude should stay on the feature branch.
 	if !strings.Contains(result, "do NOT checkout main") {
@@ -2746,7 +2746,7 @@ func TestMergeDocumentNoRebaseLoop(t *testing.T) {
 	}
 	conflictFiles := []string{"main.go"}
 
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
 
 	// No rebase loop — tool handles the rebase-main-then-feature-branch flow.
 	if strings.Contains(result, "fetch and rebase again") {
