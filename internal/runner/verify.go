@@ -28,9 +28,21 @@ func (r *Runner) Verify() error {
 
 	// Prepare work directory.
 	wd := filepath.Join(baseDir, "work", "_verify")
-	_, err = r.prepareRepo(wd)
+	verifyRepo, err := r.prepareRepo(wd)
 	if err != nil {
 		return fmt.Errorf("preparing work directory: %w", err)
+	}
+
+	// Fetch and rebase against origin/main to ensure we verify the latest code.
+	if err := verifyRepo.Fetch(); err != nil {
+		return fmt.Errorf("fetching origin: %w", err)
+	}
+	defaultBranch, err := r.detectDefaultBranch(verifyRepo)
+	if err != nil {
+		return fmt.Errorf("detecting default branch: %w", err)
+	}
+	if err := verifyRepo.Rebase("origin/" + defaultBranch); err != nil {
+		return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
 	}
 
 	// Run before hook.
