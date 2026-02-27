@@ -2268,6 +2268,393 @@ func TestNoBeforeHookSkipsSilently(t *testing.T) {
 	}
 }
 
+func TestTimeoutSectionEmpty(t *testing.T) {
+	result := timeoutSection(0)
+	if result != "" {
+		t.Errorf("expected empty string for zero timeout, got %q", result)
+	}
+}
+
+func TestTimeoutSectionWithDuration(t *testing.T) {
+	result := timeoutSection(30 * 60 * 1e9) // 30 minutes in nanoseconds
+	if !strings.Contains(result, "Time Limit") {
+		t.Error("timeout section missing Time Limit heading")
+	}
+	if !strings.Contains(result, "30m") {
+		t.Error("timeout section missing duration value")
+	}
+	if !strings.Contains(result, "commit whatever progress") {
+		t.Error("timeout section missing partial commit instruction")
+	}
+}
+
+func TestNotificationSection(t *testing.T) {
+	result := notificationSection()
+	if !strings.Contains(result, "Desktop Notifications") {
+		t.Error("notification section missing heading")
+	}
+	if !strings.Contains(result, "send a desktop notification") {
+		t.Error("notification section missing notification instruction")
+	}
+	if !strings.Contains(result, "confirmation") {
+		t.Error("notification section missing confirmation context")
+	}
+}
+
+func TestRunDocumentIncludesNotification(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Notify = true
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	_ = r.Run("add-feature")
+
+	if !strings.Contains(captured, "Desktop Notifications") {
+		t.Error("run document missing notification section when Notify=true")
+	}
+}
+
+func TestRunDocumentExcludesNotificationWhenDisabled(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Notify = false
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	_ = r.Run("add-feature")
+
+	if strings.Contains(captured, "Desktop Notifications") {
+		t.Error("run document should not contain notification section when Notify=false")
+	}
+}
+
+func TestRunDocumentIncludesTimeout(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Write hydra.yml with a timeout.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"timeout: \"45m\"\ncommands:\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	_ = r.Run("add-feature")
+
+	if !strings.Contains(captured, "Time Limit") {
+		t.Error("run document missing timeout section when timeout configured")
+	}
+	if !strings.Contains(captured, "45m") {
+		t.Error("run document missing timeout duration value")
+	}
+}
+
+func TestTestDocumentIncludesNotification(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Notify = true
+
+	// Move task to review so Test can find it.
+	task, _ := r.Design.FindTask("add-feature")
+	_ = r.Design.MoveTask(task, design.StateReview)
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	_ = r.Test("add-feature")
+
+	if !strings.Contains(captured, "Desktop Notifications") {
+		t.Error("test document missing notification section when Notify=true")
+	}
+}
+
+func TestReviewDocumentIncludesNotification(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Notify = true
+
+	// Move task to review.
+	task, _ := r.Design.FindTask("add-feature")
+	_ = r.Design.MoveTask(task, design.StateReview)
+
+	var captured string
+	r.Claude = mockClaudeCapture(&captured)
+
+	_ = r.Review("add-feature")
+
+	if !strings.Contains(captured, "Desktop Notifications") {
+		t.Error("review document missing notification section when Notify=true")
+	}
+}
+
+func TestMergeDocumentIncludesFetchRemote(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+		"lint": "golangci-lint run",
+	}
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false)
+
+	if !strings.Contains(result, "Fetch Remote") {
+		t.Error("merge document missing Fetch Remote section")
+	}
+	if !strings.Contains(result, "git fetch origin") {
+		t.Error("merge document missing git fetch origin instruction")
+	}
+}
+
+func TestMergeDocumentConflictResolutionReport(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	conflictFiles := []string{"main.go", "config.go"}
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+
+	if !strings.Contains(result, "Conflict Resolution Report") {
+		t.Error("merge document missing Conflict Resolution Report section")
+	}
+	if !strings.Contains(result, "which side you kept") {
+		t.Error("merge document missing conflict decision reporting instruction")
+	}
+}
+
+func TestMergeDocumentRebaseLoop(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	conflictFiles := []string{"main.go"}
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+
+	if !strings.Contains(result, "fetch and rebase again") {
+		t.Error("merge document missing rebase loop instruction")
+	}
+	if !strings.Contains(result, "already up to date") {
+		t.Error("merge document missing up-to-date termination condition")
+	}
+}
+
+func TestMergeDocumentIncludesNotification(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0, true)
+
+	if !strings.Contains(result, "Desktop Notifications") {
+		t.Error("merge document missing notification section when notify=true")
+	}
+
+	result = assembleMergeDocument("Task content", nil, cmds, false, 0, false)
+	if strings.Contains(result, "Desktop Notifications") {
+		t.Error("merge document should not contain notification section when notify=false")
+	}
+}
+
+func TestMergeDocumentIncludesTimeout(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	result := assembleMergeDocument("Task content", nil, cmds, false, 30*60*1e9, false)
+
+	if !strings.Contains(result, "Time Limit") {
+		t.Error("merge document missing timeout section")
+	}
+}
+
+func TestVerifyDocumentIncludesTestCoverage(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	result := assembleVerifyDocument("Feature X must do Y.", cmds)
+
+	if !strings.Contains(result, "adequate test coverage") {
+		t.Error("verify document missing test coverage instruction")
+	}
+	if !strings.Contains(result, "lacks adequate test coverage") {
+		t.Error("verify document missing test coverage failure criterion")
+	}
+}
+
+func TestTestRebaseConditional(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Move task to review.
+	task, _ := r.Design.FindTask("add-feature")
+	_ = r.Design.MoveTask(task, design.StateReview)
+
+	// Run without rebase — should succeed (no rebase attempted).
+	r.Rebase = false
+	r.Claude = mockClaude
+	err = r.Test("add-feature")
+	if err != nil {
+		t.Fatalf("Test without rebase failed: %v", err)
+	}
+}
+
+func TestReviewRebaseConditional(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Move task to review.
+	task, _ := r.Design.FindTask("add-feature")
+	_ = r.Design.MoveTask(task, design.StateReview)
+
+	// Run without rebase — should succeed.
+	r.Rebase = false
+	r.Claude = mockClaude
+	err = r.Review("add-feature")
+	if err != nil {
+		t.Fatalf("Review without rebase failed: %v", err)
+	}
+}
+
+func TestMergeGroupWorkflow(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Claude = mockClaude
+
+	// Run both backend tasks to move them to review.
+	if err := r.Run("backend/add-api"); err != nil {
+		t.Fatalf("Run backend/add-api: %v", err)
+	}
+
+	// Need a fresh runner to pick up design dir changes.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Claude = mockClaude
+
+	if err := r.Run("backend/add-db"); err != nil {
+		t.Fatalf("Run backend/add-db: %v", err)
+	}
+
+	// Reload runner to see current state.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Claude = mockClaude
+
+	// MergeGroup should merge both review tasks.
+	if err := r.MergeGroup("backend"); err != nil {
+		t.Fatalf("MergeGroup: %v", err)
+	}
+
+	// Reload to check final state.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both tasks should be completed.
+	tasks, err := r.Design.TasksByState(design.StateCompleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found int
+	for _, task := range tasks {
+		if task.Group == "backend" {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected 2 completed backend tasks, got %d", found)
+	}
+}
+
+func TestMergeGroupEmptyError(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	err = r.MergeGroup("nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent group")
+	}
+}
+
+func TestRunnerTimeout(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Write hydra.yml with timeout.
+	writeFile(t, filepath.Join(env.DesignDir, "hydra.yml"),
+		"timeout: \"2h\"\ncommands:\n  test: \"true\"\n  lint: \"true\"\n")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	timeout := r.timeout()
+	if timeout != 2*3600*1e9 {
+		t.Errorf("expected 2h timeout, got %v", timeout)
+	}
+}
+
+func TestRunnerTimeoutZeroWhenNotSet(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	timeout := r.timeout()
+	if timeout != 0 {
+		t.Errorf("expected zero timeout when not configured, got %v", timeout)
+	}
+}
+
 func TestDocumentsProhibitIndividualTestLint(t *testing.T) {
 	// commitInstructions must always prohibit manual test/lint runs,
 	// even when no commands are configured.

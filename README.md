@@ -114,6 +114,8 @@ hydra merge run 42-fix-bug
 
 ## Command Reference
 
+Most commands set the terminal (xterm) title to show what hydra is doing. Help commands (`help`, `--help`, `-h`) do not modify the terminal title.
+
 ### `hydra init <source-repo-url> <design-dir>`
 
 Initializes a hydra project. Clones the source repository into `./repo`, registers the design directory, and creates `.hydra/config.json`. If the design directory is empty, scaffolds the full directory structure with placeholder files. A convenience symlink `./design` is created pointing to the design directory.
@@ -139,6 +141,7 @@ Executes the full task lifecycle:
 
 - `--no-auto-accept` / `-Y` — Disable auto-accept (prompt for each tool call)
 - `--no-plan` / `-P` — Disable plan mode (skip plan approval, run fully autonomously)
+- `--no-notify` / `-N` — Disable desktop notifications (by default, Claude is instructed to send desktop notifications when it needs user confirmation)
 - `--model` — Override the Claude model (e.g. `--model claude-haiku-4-5-20251001`)
 
 By default, hydra auto-accepts all tool calls and starts Claude in plan mode.
@@ -162,7 +165,7 @@ hydra group merge <group-name>     # Merge all review/merge tasks in a group seq
 
 `hydra group merge` merges all tasks in review or merge state in the named group, in alphabetical order. Each task rebases onto the updated main. Stops on the first error.
 
-**`run` and `merge` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+**`run` and `merge` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--no-notify` / `-N`, `--model`
 
 ### `hydra review`
 
@@ -186,7 +189,9 @@ If Claude commits changes, they are pushed automatically. The task stays in revi
 
 `hydra review dev` runs the `dev` command from `hydra.yml` in the task's work directory. The process runs until it exits or is terminated with Ctrl+C (SIGINT), SIGTERM, or SIGHUP. Use this to start a local dev server, file watcher, or hot-reload process while reviewing a task.
 
-**`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+**`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--no-notify` / `-N`, `--rebase` / `-r`, `--model`
+
+- `--rebase` / `-r` — Rebase the task branch onto `origin/main` before the review session. Fails early if there are conflicts.
 
 ### `hydra test <task-name>`
 
@@ -199,7 +204,9 @@ Runs the `before` command if configured, then opens a test-focused Claude sessio
 
 If Claude commits changes, they are pushed automatically. The task stays in review state.
 
-**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--no-notify` / `-N`, `--rebase` / `-r`, `--model`
+
+- `--rebase` / `-r` — Rebase the task branch onto `origin/main` before running. Fails early if there are conflicts.
 
 ### `hydra clean <task-name>`
 
@@ -221,12 +228,13 @@ hydra merge run <task-name>        # Run merge workflow
 
 `hydra merge run` performs:
 
-1. Attempts to rebase onto `origin/main`; if conflicts occur, the rebase is aborted and the conflict file list is recorded
-2. Runs the `before` command if configured in `hydra.yml`
-3. Opens a single Claude session with a comprehensive document covering: conflict resolution (if needed), commit message validation, test coverage verification, and test/lint commands
-4. Force-pushes the branch, rebases into main, pushes, records the SHA, moves the task to completed, closes the remote issue if applicable, and deletes the remote feature branch
+1. Aborts any in-progress rebase before starting
+2. Attempts to rebase onto `origin/main`; if conflicts occur, the rebase is aborted and the conflict file list is recorded
+3. Runs the `before` command if configured in `hydra.yml`
+4. Opens a single Claude session with a comprehensive document covering: conflict resolution (if needed), commit message validation, test coverage verification, and test/lint commands. Claude is instructed to fetch origin before any other steps. After resolving conflicts, Claude reports what decisions were made. After rebasing, Claude loops: commit, fetch, rebase again until fully up to date with main.
+5. Force-pushes the branch, rebases into main, pushes, records the SHA, moves the task to completed, closes the remote issue if applicable, and deletes the remote feature branch
 
-**`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+**`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--no-notify` / `-N`, `--model`
 
 ### `hydra reconcile`
 
@@ -244,22 +252,23 @@ The workflow:
 
 If no completed tasks exist, the command exits with an error. If Claude fails, no tasks are deleted and `functional.md` is not modified.
 
-**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--no-notify` / `-N`, `--model`
 
 ### `hydra verify`
 
-Uses Claude to verify that every requirement in `functional.md` is satisfied by the current codebase. This is a read-only check — no source code is modified.
+Uses Claude to verify that every requirement in `functional.md` is satisfied by the current codebase. This checks both implementation and test coverage — Claude verifies that each functional requirement is implemented correctly and has adequate test coverage. No source code is modified.
 
 The workflow:
 
 1. Reads `functional.md` (errors if empty)
 2. Clones/syncs the source repo into `work/_verify/`
 3. Opens a Claude session where Claude reads the code and runs tests
-4. Claude creates `verify-passed.txt` if all requirements are met, or `verify-failed.txt` listing failures
+4. Claude checks that each requirement is implemented and has test coverage
+5. Claude creates `verify-passed.txt` if all requirements are met, or `verify-failed.txt` listing failures
 
 If verification passes, prints a success message and automatically runs a sync (importing open issues and cleaning up completed tasks). If sync fails, a warning is printed but the verify command still succeeds. If verification fails, prints the failure details and exits with an error.
 
-**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
+**Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--no-notify` / `-N`, `--model`
 
 ### `hydra other`
 
@@ -345,6 +354,11 @@ api_type: github
 # Gitea instance URL (only needed for Gitea when URL can't be parsed)
 gitea_url: https://gitea.example.com
 
+# Optional timeout using Go duration strings (e.g. "30m", "2h").
+# When set, Claude is instructed to commit partial progress and stop
+# if running low on time.
+timeout: "1h"
+
 # Commands that Claude runs before committing.
 #
 # IMPORTANT: These commands may run concurrently across multiple hydra tasks,
@@ -360,6 +374,8 @@ commands:
   test: "go test ./... -count=1"
   lint: "golangci-lint run ./..."
 ```
+
+**`timeout`** — An optional duration string (using Go duration syntax, e.g. `"30m"`, `"2h"`, `"1h30m"`) that sets a time limit for Claude sessions. When configured, Claude is instructed to commit any partial progress and stop gracefully if it is running low on time, rather than being killed mid-task.
 
 **Command keys:**
 

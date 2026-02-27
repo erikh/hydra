@@ -63,17 +63,15 @@ func (d *Dir) discoverTasks(dir string, group string, state TaskState) ([]Task, 
 	var tasks []Task
 	for _, entry := range entries {
 		if entry.IsDir() {
-			if state == StatePending {
-				subTasks, err := d.discoverTasks(
-					filepath.Join(dir, entry.Name()),
-					entry.Name(),
-					state,
-				)
-				if err != nil {
-					return nil, err
-				}
-				tasks = append(tasks, subTasks...)
+			subTasks, err := d.discoverTasks(
+				filepath.Join(dir, entry.Name()),
+				entry.Name(),
+				state,
+			)
+			if err != nil {
+				return nil, err
 			}
+			tasks = append(tasks, subTasks...)
 			continue
 		}
 
@@ -192,6 +190,11 @@ func (d *Dir) MoveTask(task *Task, newState TaskState) error {
 		destDir = filepath.Join(d.Path, "state", string(newState))
 	default:
 		return fmt.Errorf("cannot move task to state: %s", newState)
+	}
+
+	// Preserve group subdirectory structure.
+	if task.Group != "" {
+		destDir = filepath.Join(destDir, task.Group)
 	}
 
 	if err := os.MkdirAll(destDir, 0o750); err != nil {

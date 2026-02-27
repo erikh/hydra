@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadValid(t *testing.T) {
@@ -50,6 +51,62 @@ func TestLoadEmptyCommands(t *testing.T) {
 
 	if len(cmds.Commands) != 0 {
 		t.Errorf("expected empty commands, got %d", len(cmds.Commands))
+	}
+}
+
+func TestLoadTimeout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hydra.yml")
+
+	content := "timeout: \"45m\"\ncommands:\n  test: \"echo test\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmds, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cmds.Timeout == nil {
+		t.Fatal("expected timeout to be set")
+	}
+	if cmds.Timeout.Duration != 45*time.Minute {
+		t.Errorf("timeout = %v, want 45m", cmds.Timeout.Duration)
+	}
+}
+
+func TestLoadTimeoutNotSet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hydra.yml")
+
+	content := "commands:\n  test: \"echo test\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmds, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cmds.Timeout != nil {
+		t.Errorf("expected nil timeout when not set, got %v", cmds.Timeout.Duration)
+	}
+}
+
+func TestLoadTimeoutInvalid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hydra.yml")
+
+	content := "timeout: \"not-a-duration\"\ncommands:\n  test: \"echo test\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid timeout duration")
 	}
 }
 

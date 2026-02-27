@@ -510,6 +510,51 @@ func TestMoveTaskAllStates(t *testing.T) {
 	}
 }
 
+func TestMoveTaskGroupPreserved(t *testing.T) {
+	dir := setupDesignDir(t)
+	dd, _ := NewDir(dir)
+
+	task, err := dd.FindTask("backend/add-api")
+	if err != nil {
+		t.Fatalf("FindTask: %v", err)
+	}
+
+	if err := dd.MoveTask(task, StateReview); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	expectedDir := filepath.Join(dir, "state", "review", "backend")
+	if filepath.Dir(task.FilePath) != expectedDir {
+		t.Errorf("FilePath dir = %q, want %q", filepath.Dir(task.FilePath), expectedDir)
+	}
+
+	// Should be discoverable with group intact.
+	review, err := dd.TasksByState(StateReview)
+	if err != nil {
+		t.Fatalf("TasksByState: %v", err)
+	}
+
+	var found bool
+	for _, rt := range review {
+		if rt.Name == "add-api" && rt.Group == "backend" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("grouped task not found in review state with group preserved")
+	}
+
+	// FindTaskByState should also work.
+	ft, err := dd.FindTaskByState("backend/add-api", StateReview)
+	if err != nil {
+		t.Fatalf("FindTaskByState: %v", err)
+	}
+	if ft.Group != "backend" {
+		t.Errorf("Group = %q, want backend", ft.Group)
+	}
+}
+
 func TestMoveTaskInvalidState(t *testing.T) {
 	dir := setupDesignDir(t)
 	dd, _ := NewDir(dir)
