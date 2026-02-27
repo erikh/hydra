@@ -228,11 +228,15 @@ hydra merge run <task-name>        # Run merge workflow
 
 `hydra merge run` performs:
 
-1. Aborts any in-progress rebase before starting
-2. Attempts to rebase onto `origin/main`; if conflicts occur, the rebase is aborted and the conflict file list is recorded
-3. Runs the `before` command if configured in `hydra.yml`
-4. Opens a single Claude session with a comprehensive document covering: conflict resolution (if needed), commit message validation, test coverage verification, and test/lint commands. Claude is instructed to fetch origin before any other steps. After resolving conflicts, Claude reports what decisions were made. After rebasing, Claude loops: commit, fetch, rebase again until fully up to date with main.
-5. Force-pushes the branch, rebases into main, pushes, records the SHA, moves the task to completed, closes the remote issue if applicable, and deletes the remote feature branch
+1. Fetches `origin` to get the latest remote state
+2. Checks out the task's feature branch
+3. Aborts any in-progress rebase from a previous failed attempt
+4. Attempts to rebase the feature branch onto `origin/main`; if conflicts occur, the rebase is aborted and the conflict file list is recorded
+5. Runs the `before` command if configured in `hydra.yml`
+6. Opens a Claude session on the feature branch. Claude is explicitly told to stay on the feature branch and not push — the tool handles all branch switching and pushing. The document covers: conflict resolution (if needed, with a report of decisions made), commit message validation, test coverage verification, and test/lint commands
+7. Force-pushes the feature branch
+8. Checks out `main`, rebases it against `origin/main`, then rebases it against the feature branch to incorporate the task's commits, and pushes `main`
+9. Records the SHA, moves the task to completed, closes the remote issue if applicable, and deletes the remote feature branch
 
 **`run` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--no-notify` / `-N`, `--model`
 

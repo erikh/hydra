@@ -2677,3 +2677,166 @@ func TestDocumentsProhibitIndividualTestLint(t *testing.T) {
 		t.Error("commitInstructions missing individual test prohibition when commands configured")
 	}
 }
+
+func TestMergeDocumentStayOnFeatureBranch(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+
+	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false)
+
+	if !strings.Contains(result, "do NOT checkout main") {
+		t.Error("merge document missing instruction to not checkout main")
+	}
+	if !strings.Contains(result, "Do NOT push") {
+		t.Error("merge document missing instruction to not push")
+	}
+	if !strings.Contains(result, "Stay on it") {
+		t.Error("merge document missing instruction to stay on feature branch")
+	}
+	if !strings.Contains(result, "You are on the feature branch") {
+		t.Error("merge document missing statement about being on the feature branch")
+	}
+}
+
+func TestMergeDocumentStayOnFeatureBranchWithConflicts(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	conflictFiles := []string{"main.go"}
+
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+
+	// Even with conflicts, Claude should stay on the feature branch.
+	if !strings.Contains(result, "do NOT checkout main") {
+		t.Error("merge document with conflicts missing instruction to not checkout main")
+	}
+	if !strings.Contains(result, "Do NOT push") {
+		t.Error("merge document with conflicts missing instruction to not push")
+	}
+
+	// Conflict instructions should not include fetch (tool handles it).
+	if strings.Contains(result, "git fetch") {
+		t.Error("merge document conflict instructions should not include fetch")
+	}
+}
+
+func TestMergeDocumentNoRebaseLoop(t *testing.T) {
+	cmds := map[string]string{
+		"test": "go test ./...",
+	}
+	conflictFiles := []string{"main.go"}
+
+	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
+
+	// No rebase loop — tool handles the rebase-main-then-feature-branch flow.
+	if strings.Contains(result, "fetch and rebase again") {
+		t.Error("merge document should not contain rebase loop instruction (tool handles it)")
+	}
+	if strings.Contains(result, "Repeat step 5 until") {
+		t.Error("merge document should not instruct repeating fetch/rebase (tool handles it)")
+	}
+}
+
+func TestMergeWorkflowBranchOnMain(t *testing.T) {
+	// After merge, main should contain the feature branch commits
+	// and the work directory should end on main.
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run the task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
+
+	if err := r.Merge("add-feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Verify current branch in work dir is main after merge.
+	wd := workDirForTask(env.BaseDir)
+	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch != "main" {
+		t.Errorf("expected work dir to be on main after merge, got %q", branch)
+	}
+}
+
+func TestMergeClaudeRunsOnFeatureBranch(t *testing.T) {
+	// Verify Claude is invoked while on the feature branch, not main.
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var claudeRepoDir string
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		claudeRepoDir = cfg.RepoDir
+		// Verify we're on the feature branch when Claude runs.
+		out, err := exec.CommandContext(context.Background(), "git", "-C", cfg.RepoDir, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
+		if err != nil {
+			t.Fatalf("git rev-parse in Claude: %v", err)
+		}
+		branch := strings.TrimSpace(string(out))
+		if branch != "hydra/add-feature" {
+			t.Errorf("Claude invoked on branch %q, want hydra/add-feature", branch)
+		}
+		return nil
+	}
+
+	if err := r.Merge("add-feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	if claudeRepoDir == "" {
+		t.Error("Claude was not invoked during merge")
+	}
+}
+
+func TestMergeMainRebasedAgainstOrigin(t *testing.T) {
+	// After merge, local main should be up-to-date with origin/main.
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
+
+	if err := r.Merge("add-feature"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Verify origin/main is an ancestor of local main.
+	wd := workDirForTask(env.BaseDir)
+	err = exec.CommandContext(context.Background(), "git", "-C", wd, "merge-base", "--is-ancestor", "origin/main", "main").Run() //nolint:gosec // test
+	if err != nil {
+		t.Error("origin/main should be an ancestor of local main after merge")
+	}
+}
