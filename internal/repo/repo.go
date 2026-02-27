@@ -216,3 +216,13 @@ func (r *Repo) IsAncestor(ancestor, ref string) bool {
 	_, err := r.run("merge-base", "--is-ancestor", ancestor, ref)
 	return err == nil
 }
+
+// MergeBase returns the merge-base commit between two refs.
+func (r *Repo) MergeBase(a, b string) (string, error) {
+	return r.run("merge-base", a, b)
+}
+
+// DiffRange runs git diff between two refs and returns the output.
+func (r *Repo) DiffRange(base, head string) (string, error) {
+	return r.run("diff", base+"..."+head)
+}

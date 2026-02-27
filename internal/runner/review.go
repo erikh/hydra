@@ -250,6 +250,51 @@ func (r *Runner) ReviewEdit(taskName, editor string) error {
 	return design.RunEditorOnFile(editor, task.FilePath, os.Stdin, os.Stdout, os.Stderr)
 }
 
+// ReviewDiff fetches the latest remote and shows the git diff between
+// origin/main and the task's branch.
+func (r *Runner) ReviewDiff(taskName string) error {
+	task, err := r.Design.FindTaskByState(taskName, design.StateReview)
+	if err != nil {
+		return err
+	}
+
+	wd := r.workDir(task)
+	taskRepo, err := r.prepareRepo(wd)
+	if err != nil {
+		return fmt.Errorf("preparing work directory: %w", err)
+	}
+
+	branch := task.BranchName()
+	if !taskRepo.BranchExists(branch) {
+		return fmt.Errorf("branch %q does not exist", branch)
+	}
+	if err := taskRepo.Checkout(branch); err != nil {
+		return fmt.Errorf("checking out branch: %w", err)
+	}
+
+	if err := taskRepo.Fetch(); err != nil {
+		return fmt.Errorf("fetching: %w", err)
+	}
+
+	defaultBranch, err := r.detectDefaultBranch(taskRepo)
+	if err != nil {
+		return fmt.Errorf("detecting default branch: %w", err)
+	}
+
+	diff, err := taskRepo.DiffRange("origin/"+defaultBranch, branch)
+	if err != nil {
+		return fmt.Errorf("getting diff: %w", err)
+	}
+
+	if diff == "" {
+		fmt.Println("No changes.")
+		return nil
+	}
+
+	fmt.Println(diff)
+	return nil
+}
+
 // ReviewRemove moves a task from review to abandoned.
 func (r *Runner) ReviewRemove(taskName string) error {
 	task, err := r.Design.FindTaskByState(taskName, design.StateReview)

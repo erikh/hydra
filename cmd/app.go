@@ -932,6 +932,22 @@ func reviewCommand() *cli.Command {
 				},
 			},
 			{
+				Name:         "diff",
+				Usage:        "Show git diff for all changes on the task's branch",
+				ArgsUsage:    "<task-name>",
+				BashComplete: complete,
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra review diff <task-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return r.ReviewDiff(c.Args().Get(0))
+				},
+			},
+			{
 				Name:         "dev",
 				Usage:        "Run the dev command from hydra.yml in the task's work directory",
 				ArgsUsage:    "<task-name>",
