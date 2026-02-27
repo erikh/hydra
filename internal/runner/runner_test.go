@@ -2415,18 +2415,19 @@ func TestReviewDocumentIncludesNotification(t *testing.T) {
 	}
 }
 
-func TestMergeDocumentIncludesFetchRemote(t *testing.T) {
+func TestMergeDocumentNoFetchInstruction(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
 	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false)
 
-	if !strings.Contains(result, "Fetch Remote") {
-		t.Error("merge document missing Fetch Remote section")
+	// Fetch is handled by the tool, not by Claude.
+	if strings.Contains(result, "Fetch Remote") {
+		t.Error("merge document should not contain Fetch Remote section (tool handles fetch)")
 	}
-	if !strings.Contains(result, "git fetch origin") {
-		t.Error("merge document missing git fetch origin instruction")
+	if strings.Contains(result, "git fetch origin") {
+		t.Error("merge document should not instruct Claude to fetch (tool handles fetch)")
 	}
 }
 
@@ -2445,18 +2446,23 @@ func TestMergeDocumentConflictResolutionReport(t *testing.T) {
 	}
 }
 
-func TestMergeDocumentRebaseLoop(t *testing.T) {
+func TestMergeDocumentConflictInstructions(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
 	conflictFiles := []string{"main.go"}
 	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false)
 
-	if !strings.Contains(result, "fetch and rebase again") {
-		t.Error("merge document missing rebase loop instruction")
+	// Claude should be told to rebase and resolve, but not to loop (tool handles that).
+	if !strings.Contains(result, "git rebase origin/main") {
+		t.Error("merge document missing rebase instruction")
 	}
-	if !strings.Contains(result, "already up to date") {
-		t.Error("merge document missing up-to-date termination condition")
+	if !strings.Contains(result, "git rebase --continue") {
+		t.Error("merge document missing rebase --continue instruction")
+	}
+	// No fetch instruction — tool handles fetch.
+	if strings.Contains(result, "git fetch") {
+		t.Error("merge document should not instruct Claude to fetch (tool handles fetch)")
 	}
 }
 

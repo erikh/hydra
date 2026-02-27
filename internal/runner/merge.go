@@ -16,7 +16,13 @@ import (
 	"github.com/erikh/hydra/internal/repo"
 )
 
-// Merge runs the merge workflow: rebase onto origin/main, test, rebase into main, push.
+// Merge runs the merge workflow:
+//  1. Fetch origin, checkout task branch, abort any in-progress rebase
+//  2. Rebase task branch onto origin/main
+//  3. If conflicts, invoke Claude to resolve them
+//  4. Force-push the branch
+//  5. Checkout main, rebase against origin/main, rebase against feature branch, push
+//
 // Accepts tasks in review or merge state (merge state for retries).
 func (r *Runner) Merge(taskName string) error {
 	baseDir := r.BaseDir
@@ -52,10 +58,12 @@ func (r *Runner) Merge(taskName string) error {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
-	// Abort any in-progress rebase from a previous failed attempt.
-	_ = taskRepo.RebaseAbort()
+	// Step 1: Fetch origin to get latest remote state.
+	if err := taskRepo.Fetch(); err != nil {
+		return fmt.Errorf("fetching origin: %w", err)
+	}
 
-	// Checkout the task's branch.
+	// Step 2: Checkout the task's branch.
 	branch := task.BranchName()
 	if !taskRepo.BranchExists(branch) {
 		return fmt.Errorf("task branch %q does not exist", branch)
@@ -64,13 +72,16 @@ func (r *Runner) Merge(taskName string) error {
 		return fmt.Errorf("checking out branch: %w", err)
 	}
 
-	// Attempt rebase onto origin/main; collect conflict info if any.
+	// Step 3: Abort any in-progress rebase from a previous failed attempt.
+	_ = taskRepo.RebaseAbort()
+
+	// Step 4: Rebase task branch onto origin/main; collect conflict info if any.
 	conflictFiles, err := r.attemptRebase(taskRepo)
 	if err != nil {
 		return err
 	}
 
-	// Assemble single comprehensive document and invoke Claude once.
+	// Step 5: Assemble document and invoke Claude.
 	content, _ := task.Content()
 	cmds := r.commandsMap(wd)
 	sign := taskRepo.HasSigningKey()
@@ -93,18 +104,18 @@ func (r *Runner) Merge(taskName string) error {
 		PlanMode:   r.PlanMode,
 	})
 
-	// Force-push the branch (Claude may have added commits).
+	// Step 6: Force-push the branch (Claude may have added commits).
 	if err := taskRepo.ForcePushWithLease(branch); err != nil {
 		return fmt.Errorf("pushing branch: %w", err)
 	}
 
-	// Rebase task branch into main and push.
+	// Step 7: Checkout main, rebase against origin/main, then against feature branch, push.
 	defaultBranch, err := r.rebaseAndPush(taskRepo, branch)
 	if err != nil {
 		return err
 	}
 
-	// Record SHA, complete task, close issue, clean up remote branch.
+	// Step 8: Record SHA, complete task, close issue, clean up remote branch.
 	return r.finalizeMerge(task, taskRepo, taskName, branch, defaultBranch)
 }
 
@@ -121,14 +132,11 @@ func (r *Runner) findMergeTask(taskName string) (*design.Task, error) {
 	return task, nil
 }
 
-// attemptRebase fetches, detects the default branch, and attempts to rebase
-// onto origin/<default>. If the rebase has conflicts, it aborts the rebase and
-// returns the list of conflicted files. On success, returns an empty list.
+// attemptRebase detects the default branch and attempts to rebase onto
+// origin/<default>. The caller must have already fetched. If the rebase has
+// conflicts, it aborts the rebase and returns the list of conflicted files.
+// On success, returns an empty list.
 func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
-	if err := taskRepo.Fetch(); err != nil {
-		return nil, fmt.Errorf("fetching: %w", err)
-	}
-
 	defaultBranch, err := r.detectDefaultBranch(taskRepo)
 	if err != nil {
 		return nil, fmt.Errorf("detecting default branch: %w", err)
@@ -154,6 +162,10 @@ func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
 // assembleMergeDocument builds a single comprehensive document for the merge
 // workflow. It covers conflict resolution (if needed), test/lint verification,
 // commit message validation, and test coverage — all in one Claude session.
+//
+// The calling tool handles all git orchestration (fetch, rebase, checkout, push).
+// Claude's job is limited to: resolving conflicts (if any), validating commits,
+// verifying test coverage, and running tests.
 func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool, timeout time.Duration, notify bool) string {
 	var b strings.Builder
 
@@ -162,9 +174,6 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 		"Complete all steps below in order. " +
 		"Do not make changes beyond what is required for the merge — resolve conflicts, validate commits and tests, and commit. Nothing else.\n\n")
 
-	b.WriteString("## Fetch Remote\n\n")
-	b.WriteString("Before doing anything else, run `git fetch origin` to ensure you have the latest remote state.\n\n")
-
 	b.WriteString("## Task Document\n\n")
 	b.WriteString(taskContent)
 	b.WriteString("\n\n")
@@ -172,14 +181,13 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 	// Conflict resolution section (only if there are conflicts).
 	if len(conflictFiles) > 0 {
 		b.WriteString("## Conflict Resolution\n\n")
-		b.WriteString("A rebase onto origin/main was attempted but resulted in conflicts. " +
+		b.WriteString("A rebase of this branch onto origin/main was attempted but resulted in conflicts. " +
 			"The rebase has been aborted. You must:\n\n")
-		b.WriteString("1. Run `git fetch origin` then `git rebase origin/main`\n")
+		b.WriteString("1. Run `git rebase origin/main`\n")
 		b.WriteString("2. Resolve the conflicts in the files listed below\n")
 		b.WriteString("3. Stage resolved files with `git add`\n")
 		b.WriteString("4. Run `git rebase --continue`\n")
-		b.WriteString("5. After the rebase completes, commit your changes, then fetch and rebase again (`git fetch origin && git rebase origin/main`)\n")
-		b.WriteString("6. Repeat step 5 until the rebase reports nothing new from the remote (already up to date)\n\n")
+		b.WriteString("5. Repeat until the rebase is complete\n\n")
 
 		b.WriteString("### Conflicted Files\n\n")
 		for _, f := range conflictFiles {
@@ -217,7 +225,9 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 	return b.String()
 }
 
-// rebaseAndPush checks out the default branch, rebases the task branch into it, and pushes.
+// rebaseAndPush checks out the default branch, rebases it against origin/main
+// to pick up any upstream changes, then rebases against the feature branch to
+// incorporate the task's commits, and pushes.
 func (r *Runner) rebaseAndPush(taskRepo *repo.Repo, branch string) (string, error) {
 	defaultBranch, err := r.detectDefaultBranch(taskRepo)
 	if err != nil {
@@ -228,12 +238,19 @@ func (r *Runner) rebaseAndPush(taskRepo *repo.Repo, branch string) (string, erro
 		return "", fmt.Errorf("checking out %s: %w", defaultBranch, err)
 	}
 
+	// Fetch latest and rebase main against origin/main.
 	if err := taskRepo.Fetch(); err != nil {
 		return "", fmt.Errorf("fetching before rebase: %w", err)
 	}
 
+	originRef := "origin/" + defaultBranch
+	if err := taskRepo.Rebase(originRef); err != nil {
+		return "", fmt.Errorf("rebasing %s against %s: %w", defaultBranch, originRef, err)
+	}
+
+	// Rebase main against the feature branch to incorporate task commits.
 	if err := taskRepo.Rebase(branch); err != nil {
-		return "", fmt.Errorf("rebase failed: %w", err)
+		return "", fmt.Errorf("rebasing %s against %s: %w", defaultBranch, branch, err)
 	}
 
 	if err := taskRepo.PushMain(); err != nil {
