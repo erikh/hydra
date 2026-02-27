@@ -167,10 +167,12 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 		b.WriteString("## Conflict Resolution\n\n")
 		b.WriteString("A rebase onto origin/main was attempted but resulted in conflicts. " +
 			"The rebase has been aborted. You must:\n\n")
-		b.WriteString("1. Run `git rebase origin/main`\n")
+		b.WriteString("1. Run `git fetch origin` then `git rebase origin/main`\n")
 		b.WriteString("2. Resolve the conflicts in the files listed below\n")
 		b.WriteString("3. Stage resolved files with `git add`\n")
-		b.WriteString("4. Run `git rebase --continue`\n\n")
+		b.WriteString("4. Run `git rebase --continue`\n")
+		b.WriteString("5. After the rebase completes, commit your changes, then fetch and rebase again (`git fetch origin && git rebase origin/main`)\n")
+		b.WriteString("6. Repeat step 5 until the rebase reports nothing new from the remote (already up to date)\n\n")
 
 		b.WriteString("### Conflicted Files\n\n")
 		for _, f := range conflictFiles {
