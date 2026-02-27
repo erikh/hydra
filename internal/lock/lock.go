@@ -77,6 +77,15 @@ func (l *Lock) Release() error {
 	return nil
 }
 
+// IsHeld returns true if the lock file exists and is held by a live process.
+func (l *Lock) IsHeld() bool {
+	existing, err := l.read()
+	if err != nil || existing == nil {
+		return false
+	}
+	return processAlive(existing.PID)
+}
+
 func (l *Lock) read() (*lockData, error) {
 	data, err := os.ReadFile(l.path)
 	if err != nil {

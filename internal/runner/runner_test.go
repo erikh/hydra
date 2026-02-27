@@ -3031,3 +3031,107 @@ func TestMergeListShowsReviewStateTasks(t *testing.T) {
 		t.Errorf("MergeList should show review-state task, got: %q", string(out))
 	}
 }
+
+func TestFixOrphanedWorkDirsRemoved(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Create an orphaned work directory (no corresponding task).
+	orphanDir := filepath.Join(env.BaseDir, "work", "nonexistent-task")
+	if err := os.MkdirAll(orphanDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run fix.
+	if err := r.Fix(); err != nil {
+		t.Fatalf("Fix: %v", err)
+	}
+
+	// Orphaned directory should be removed.
+	if _, err := os.Stat(orphanDir); !os.IsNotExist(err) {
+		t.Error("orphaned work directory should have been removed by fix")
+	}
+}
+
+func TestFixOrphanedGroupWorkDirsRemoved(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Create an orphaned grouped work directory.
+	groupDir := filepath.Join(env.BaseDir, "work", "backend")
+	orphanDir := filepath.Join(groupDir, "nonexistent-task")
+	if err := os.MkdirAll(orphanDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.Fix(); err != nil {
+		t.Fatalf("Fix: %v", err)
+	}
+
+	if _, err := os.Stat(orphanDir); !os.IsNotExist(err) {
+		t.Error("orphaned grouped work directory should have been removed by fix")
+	}
+}
+
+func TestFixStuckMergeTasksMovedToReview(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run a task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Reload and move to merge state manually (simulating a stuck merge).
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	task, err := r.Design.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Fatalf("FindTaskByState: %v", err)
+	}
+	if err := r.Design.MoveTask(task, design.StateMerge); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	// Verify it's in merge state.
+	_, err = r.Design.FindTaskByState("add-feature", design.StateMerge)
+	if err != nil {
+		t.Fatalf("task should be in merge state: %v", err)
+	}
+
+	// Run fix — should move it back to review since no lock is held.
+	if err := r.Fix(); err != nil {
+		t.Fatalf("Fix: %v", err)
+	}
+
+	// Reload and check state.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = r.Design.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Errorf("stuck merge task should have been moved back to review: %v", err)
+	}
+}

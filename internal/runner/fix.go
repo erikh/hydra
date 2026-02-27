@@ -57,6 +57,12 @@ func (r *Runner) Fix() error {
 	}
 	issues += i
 
+	i, err = r.fixStuckMergeTasks()
+	if err != nil {
+		return fmt.Errorf("checking stuck merge tasks: %w", err)
+	}
+	issues += i
+
 	if issues == 0 {
 		fmt.Println("No issues found.")
 	} else {
@@ -378,15 +384,28 @@ func (r *Runner) fixOrphanedWorkDirs(baseDir string) (int, error) {
 				subPath := filepath.Join(entryPath, sub.Name())
 				if !expected[subPath] {
 					issues++
-					fmt.Printf("ORPHAN: work directory %s has no corresponding task\n", subPath)
+					if err := os.RemoveAll(subPath); err == nil {
+						fmt.Printf("FIXED: removed orphaned work directory %s\n", subPath)
+					} else {
+						fmt.Printf("ERROR: could not remove orphaned work directory %s: %v\n", subPath, err)
+					}
 				}
+			}
+			// Remove the group dir if now empty.
+			remaining, _ := os.ReadDir(entryPath)
+			if len(remaining) == 0 {
+				_ = os.Remove(entryPath)
 			}
 			continue
 		}
 
 		// Not expected and not a group dir.
 		issues++
-		fmt.Printf("ORPHAN: work directory %s has no corresponding task\n", entryPath)
+		if err := os.RemoveAll(entryPath); err == nil {
+			fmt.Printf("FIXED: removed orphaned work directory %s\n", entryPath)
+		} else {
+			fmt.Printf("ERROR: could not remove orphaned work directory %s: %v\n", entryPath, err)
+		}
 	}
 
 	return issues, nil
@@ -405,4 +424,44 @@ func isGroupWorkDir(path string) bool {
 		}
 	}
 	return false
+}
+
+// fixStuckMergeTasks moves tasks from merge back to review when they have no
+// active lock (indicating a failed merge attempt left them stuck).
+func (r *Runner) fixStuckMergeTasks() (int, error) {
+	tasks, err := r.Design.TasksByState(design.StateMerge)
+	if err != nil {
+		return 0, err
+	}
+
+	baseDir := r.BaseDir
+	if baseDir == "" {
+		baseDir = "."
+	}
+	hydraDir := config.HydraPath(baseDir)
+
+	issues := 0
+	for i := range tasks {
+		t := &tasks[i]
+		taskName := t.Name
+		if t.Group != "" {
+			taskName = t.Group + "/" + t.Name
+		}
+
+		// Check if there's an active lock for this merge.
+		lk := lock.New(hydraDir, "merge:"+taskName)
+		if lk.IsHeld() {
+			continue
+		}
+
+		// No lock — this task is stuck in merge state.
+		issues++
+		if err := r.Design.MoveTask(t, design.StateReview); err != nil {
+			fmt.Printf("ERROR: could not move %s from merge to review: %v\n", taskName, err)
+		} else {
+			fmt.Printf("FIXED: moved stuck task %q from merge back to review\n", taskName)
+		}
+	}
+
+	return issues, nil
 }
