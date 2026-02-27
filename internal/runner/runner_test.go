@@ -2858,3 +2858,87 @@ func TestMergeMainRebasedAgainstOrigin(t *testing.T) {
 		t.Error("origin/main should be an ancestor of local main after merge")
 	}
 }
+
+func TestReviewListShowsTasks(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run a task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Reload to pick up state changes.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the task is discoverable in review state.
+	tasks, err := r.Design.TasksByState(design.StateReview)
+	if err != nil {
+		t.Fatalf("TasksByState: %v", err)
+	}
+
+	var found bool
+	for _, task := range tasks {
+		if task.Name == "add-feature" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("add-feature not found in review state, got %d tasks", len(tasks))
+		for _, task := range tasks {
+			t.Logf("  found: %s (group=%s)", task.Name, task.Group)
+		}
+	}
+}
+
+func TestReviewListShowsGroupedTasks(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run a grouped task to move it to review.
+	if err := r.Run("backend/add-api"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Reload to pick up state changes.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the task is discoverable in review state with group preserved.
+	tasks, err := r.Design.TasksByState(design.StateReview)
+	if err != nil {
+		t.Fatalf("TasksByState: %v", err)
+	}
+
+	var found bool
+	for _, task := range tasks {
+		if task.Name == "add-api" && task.Group == "backend" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("backend/add-api not found in review state with group preserved, got %d tasks", len(tasks))
+		for _, task := range tasks {
+			t.Logf("  found: %s (group=%s)", task.Name, task.Group)
+		}
+	}
+}
