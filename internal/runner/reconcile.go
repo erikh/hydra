@@ -50,9 +50,21 @@ func (r *Runner) Reconcile() error {
 
 	// Prepare work directory.
 	wd := filepath.Join(baseDir, "work", "_reconcile")
-	_, err = r.prepareRepo(wd)
+	reconcileRepo, err := r.prepareRepo(wd)
 	if err != nil {
 		return fmt.Errorf("preparing work directory: %w", err)
+	}
+
+	// Fetch and rebase against origin/main to ensure we reconcile against the latest code.
+	if err := reconcileRepo.Fetch(); err != nil {
+		return fmt.Errorf("fetching origin: %w", err)
+	}
+	defaultBranch, err := r.detectDefaultBranch(reconcileRepo)
+	if err != nil {
+		return fmt.Errorf("detecting default branch: %w", err)
+	}
+	if err := reconcileRepo.Rebase("origin/" + defaultBranch); err != nil {
+		return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
 	}
 
 	// Copy current functional.md into the work directory for Claude to edit.
