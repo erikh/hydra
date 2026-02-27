@@ -1198,8 +1198,14 @@ func setTerminalTitle(c *cli.Context) {
 		return
 	}
 	args := c.Args().Slice()
-	if len(args) == 0 || args[0] == "completion" || args[0] == "status" {
+	if len(args) == 0 || args[0] == "completion" || args[0] == "status" || args[0] == "help" {
 		return
+	}
+	// Skip title when any help flag is present.
+	for _, a := range args {
+		if a == "--help" || a == "-h" {
+			return
+		}
 	}
 	title := fmt.Sprintf("hydra %s [pid:%d]", strings.Join(args, " "), os.Getpid())
 	fmt.Fprintf(os.Stderr, "\033]0;%s\007", title)
