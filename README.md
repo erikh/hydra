@@ -248,11 +248,12 @@ The workflow:
 
 1. Collects all completed tasks from `state/completed/`
 2. Clones/syncs the source repo into `work/_reconcile/`
-3. Copies `functional.md` into the work directory for Claude to edit
-4. Opens a Claude session with the current functional spec, all completed task contents, and instructions to merge them
-5. Claude reads the codebase to understand what was actually implemented, then updates `functional.md`
-6. The updated `functional.md` is copied back to the design directory
-7. Completed task files are deleted
+3. Fetches `origin` and rebases against `origin/main` to ensure the latest code is used
+4. Copies `functional.md` into the work directory for Claude to edit
+5. Opens a Claude session with the current functional spec, all completed task contents, and instructions to merge them
+6. Claude reads the codebase to understand what was actually implemented, then updates `functional.md`
+7. The updated `functional.md` is copied back to the design directory
+8. Completed task files are deleted
 
 If no completed tasks exist, the command exits with an error. If Claude fails, no tasks are deleted and `functional.md` is not modified.
 
@@ -260,15 +261,17 @@ If no completed tasks exist, the command exits with an error. If Claude fails, n
 
 ### `hydra verify`
 
-Uses Claude to verify that every requirement in `functional.md` is satisfied by the current codebase. This checks both implementation and test coverage — Claude verifies that each functional requirement is implemented correctly and has adequate test coverage. No source code is modified.
+Uses Claude to verify that every requirement in `functional.md` is satisfied by the current codebase. This checks both implementation and test coverage — Claude verifies that each functional requirement is implemented correctly and has adequate test coverage.
 
 The workflow:
 
 1. Reads `functional.md` (errors if empty)
 2. Clones/syncs the source repo into `work/_verify/`
-3. Opens a Claude session where Claude reads the code and runs tests
-4. Claude checks that each requirement is implemented and has test coverage
-5. Claude creates `verify-passed.txt` if all requirements are met, or `verify-failed.txt` listing failures
+3. Fetches `origin` and rebases against `origin/main` to ensure the latest code is used
+4. Opens a Claude session where Claude reads the code and runs tests
+5. Claude checks that each requirement is implemented and has test coverage
+6. If the codebase has implemented and tested functionality not yet described in `functional.md`, Claude updates the specification file directly (at its absolute path) to keep it in sync with reality
+7. Claude creates `verify-passed.txt` if all requirements are met, or `verify-failed.txt` listing failures
 
 If verification passes, prints a success message and automatically runs a sync (importing open issues and cleaning up completed tasks). If sync fails, a warning is printed but the verify command still succeeds. If verification fails, prints the failure details and exits with an error.
 
