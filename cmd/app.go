@@ -20,11 +20,9 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
-	"github.com/erikh/hydra/internal/issues"
 	"github.com/erikh/hydra/internal/lock"
 	"github.com/erikh/hydra/internal/repo"
 	"github.com/erikh/hydra/internal/runner"
-	"github.com/erikh/hydra/internal/taskrun"
 	"github.com/erikh/hydra/internal/tui"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
@@ -50,7 +48,7 @@ func NewApp() *cli.App {
 		Commands: []*cli.Command{
 			initCommand(),
 			runCommand(),
-			runGroupCommand(),
+			groupCommand(),
 			editCommand(),
 			otherCommand(),
 			reviewCommand(),
@@ -348,59 +346,131 @@ func runCommand() *cli.Command {
 	}
 }
 
-func runGroupCommand() *cli.Command {
+func groupCommand() *cli.Command {
 	return &cli.Command{
-		Name:         "run-group",
-		Usage:        "Execute all pending tasks in a group sequentially",
-		ArgsUsage:    "<group-name>",
-		BashComplete: completeGroups,
-		Description: "Runs all pending tasks in the named group in alphabetical order. " +
-			"Between tasks, the base branch is restored so each task starts from a clean state. " +
-			"Stops immediately on the first error.",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
-				Name:    "no-auto-accept",
-				Aliases: []string{"Y"},
-				Usage:   "Disable auto-accept (prompt for each tool call)",
+		Name:  "group",
+		Usage: "Manage and run task groups",
+		Description: "List groups, list tasks within a group, run all pending tasks " +
+			"in a group, or merge all review/merge tasks in a group.",
+		Subcommands: []*cli.Command{
+			{
+				Name:  "list",
+				Usage: "List available groups",
+				Action: func(_ *cli.Context) error {
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return r.GroupList()
+				},
 			},
-			&cli.BoolFlag{
-				Name:    "no-plan",
-				Aliases: []string{"P"},
-				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+			{
+				Name:         "tasks",
+				Usage:        "List all tasks in a group (all states)",
+				ArgsUsage:    "<group-name>",
+				BashComplete: completeAllGroups,
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra group tasks <group-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					return r.GroupTasks(c.Args().Get(0))
+				},
 			},
-			&cli.StringFlag{
-				Name:  "model",
-				Usage: "Override the Claude model",
+			{
+				Name:         "run",
+				Usage:        "Run all pending tasks in a group sequentially",
+				ArgsUsage:    "<group-name>",
+				BashComplete: completeGroups,
+				Description: "Runs all pending tasks in the named group in alphabetical order. " +
+					"Each task gets its own cloned work directory. Stops on the first error.",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "no-auto-accept",
+						Aliases: []string{"Y"},
+						Usage:   "Disable auto-accept (prompt for each tool call)",
+					},
+					&cli.BoolFlag{
+						Name:    "no-plan",
+						Aliases: []string{"P"},
+						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+					},
+					&cli.StringFlag{
+						Name:  "model",
+						Usage: "Override the Claude model",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra group run <group-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					r.AutoAccept = true
+					r.PlanMode = true
+					if c.Bool("no-auto-accept") {
+						r.AutoAccept = false
+					}
+					if c.Bool("no-plan") {
+						r.PlanMode = false
+					}
+					if m := c.String("model"); m != "" {
+						r.Model = m
+					}
+					return r.RunGroup(c.Args().Get(0))
+				},
 			},
-		},
-		Action: func(c *cli.Context) error {
-			if c.NArg() != 1 {
-				return errors.New("usage: hydra run-group <group-name>")
-			}
-
-			cfg, err := config.Discover()
-			if err != nil {
-				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
-			}
-
-			r, err := runner.New(cfg)
-			if err != nil {
-				return err
-			}
-
-			r.AutoAccept = true
-			r.PlanMode = true
-			if c.Bool("no-auto-accept") {
-				r.AutoAccept = false
-			}
-			if c.Bool("no-plan") {
-				r.PlanMode = false
-			}
-			if m := c.String("model"); m != "" {
-				r.Model = m
-			}
-
-			return r.RunGroup(c.Args().Get(0))
+			{
+				Name:         "merge",
+				Usage:        "Merge all review/merge tasks in a group sequentially",
+				ArgsUsage:    "<group-name>",
+				BashComplete: completeGroups,
+				Description: "Merges all tasks in review or merge state in the named group, " +
+					"in alphabetical order. Each task rebases onto the updated main. " +
+					"Stops on the first error.",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "no-auto-accept",
+						Aliases: []string{"Y"},
+						Usage:   "Disable auto-accept (prompt for each tool call)",
+					},
+					&cli.BoolFlag{
+						Name:    "no-plan",
+						Aliases: []string{"P"},
+						Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+					},
+					&cli.StringFlag{
+						Name:  "model",
+						Usage: "Override the Claude model",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					if c.NArg() != 1 {
+						return errors.New("usage: hydra group merge <group-name>")
+					}
+					r, err := newRunner()
+					if err != nil {
+						return err
+					}
+					r.AutoAccept = true
+					r.PlanMode = true
+					if c.Bool("no-auto-accept") {
+						r.AutoAccept = false
+					}
+					if c.Bool("no-plan") {
+						r.PlanMode = false
+					}
+					if m := c.String("model"); m != "" {
+						r.Model = m
+					}
+					return r.MergeGroup(c.Args().Get(0))
+				},
+			},
 		},
 	}
 }
@@ -622,62 +692,11 @@ func syncCommand() *cli.Command {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			cfg, err := config.Discover()
-			if err != nil {
-				return fmt.Errorf("loading config (are you in an initialized hydra directory?): %w", err)
-			}
-
-			labels := c.StringSlice("label")
-
-			// Load hydra.yml for api_type/gitea_url overrides.
-			var cmds *taskrun.Commands
-			ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
-			if _, err := os.Stat(ymlPath); err == nil {
-				cmds, err = taskrun.Load(ymlPath)
-				if err != nil {
-					return fmt.Errorf("loading hydra.yml: %w", err)
-				}
-			}
-
-			// Determine the source.
-			apiType := ""
-			giteaURL := ""
-			if cmds != nil {
-				apiType = cmds.APIType
-				giteaURL = cmds.GiteaURL
-			}
-			source, err := issues.ResolveSource(cfg.SourceRepoURL, apiType, giteaURL)
+			r, err := newRunner()
 			if err != nil {
 				return err
 			}
-
-			created, skipped, err := issues.Sync(context.Background(), cfg.DesignDir, source, labels)
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("Synced issues: %d created, %d skipped\n", created, skipped)
-
-			// Clean up finished tasks: delete remote branches and close issues.
-			dd, err := design.NewDir(cfg.DesignDir)
-			if err != nil {
-				return err
-			}
-
-			sourceRepo := repo.Open(cfg.RepoDir)
-			closer := issues.ResolveCloser(source)
-
-			cleanup, err := issues.Cleanup(dd, sourceRepo, closer)
-			if err != nil {
-				return fmt.Errorf("cleanup: %w", err)
-			}
-
-			if cleanup.BranchesDeleted > 0 || cleanup.IssuesClosed > 0 {
-				fmt.Printf("Cleanup: %d branches deleted, %d issues closed\n",
-					cleanup.BranchesDeleted, cleanup.IssuesClosed)
-			}
-
-			return nil
+			return r.Sync(c.StringSlice("label"))
 		},
 	}
 }

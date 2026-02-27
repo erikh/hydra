@@ -277,6 +277,101 @@ func (r *Runner) Run(taskName string) error {
 	return nil
 }
 
+// GroupList prints all unique group names from pending tasks.
+func (r *Runner) GroupList() error {
+	tasks, err := r.Design.PendingTasks()
+	if err != nil {
+		return fmt.Errorf("listing pending tasks: %w", err)
+	}
+
+	seen := make(map[string]bool)
+	var groups []string
+	for _, t := range tasks {
+		if t.Group != "" && !seen[t.Group] {
+			seen[t.Group] = true
+			groups = append(groups, t.Group)
+		}
+	}
+
+	if len(groups) == 0 {
+		fmt.Println("No groups found.")
+		return nil
+	}
+
+	sort.Strings(groups)
+	for _, g := range groups {
+		fmt.Println(g)
+	}
+	return nil
+}
+
+// GroupTasks prints all tasks in a group across all states.
+func (r *Runner) GroupTasks(groupName string) error {
+	tasks, err := r.Design.AllTasks()
+	if err != nil {
+		return fmt.Errorf("listing tasks: %w", err)
+	}
+
+	var matched []design.Task
+	for _, t := range tasks {
+		if t.Group == groupName {
+			matched = append(matched, t)
+		}
+	}
+
+	if len(matched) == 0 {
+		return fmt.Errorf("no tasks found in group %q", groupName)
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].Name < matched[j].Name
+	})
+
+	for _, t := range matched {
+		fmt.Printf("[%s] %s/%s\n", t.State, t.Group, t.Name)
+	}
+	return nil
+}
+
+// Sync imports open issues and cleans up completed tasks.
+// It resolves the issue source from TaskRunner config, syncs issues into the
+// design directory, then deletes remote branches and closes issues for
+// completed/abandoned tasks.
+func (r *Runner) Sync(labels []string) error {
+	apiType := ""
+	giteaURL := ""
+	if r.TaskRunner != nil {
+		apiType = r.TaskRunner.APIType
+		giteaURL = r.TaskRunner.GiteaURL
+	}
+	source, err := issues.ResolveSource(r.Config.SourceRepoURL, apiType, giteaURL)
+	if err != nil {
+		return err
+	}
+
+	created, skipped, err := issues.Sync(context.Background(), r.Config.DesignDir, source, labels)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Synced issues: %d created, %d skipped\n", created, skipped)
+
+	sourceRepo := repo.Open(r.Config.RepoDir)
+	closer := issues.ResolveCloser(source)
+
+	cleanup, err := issues.Cleanup(r.Design, sourceRepo, closer)
+	if err != nil {
+		return fmt.Errorf("cleanup: %w", err)
+	}
+
+	if cleanup.BranchesDeleted > 0 || cleanup.IssuesClosed > 0 {
+		fmt.Printf("Cleanup: %d branches deleted, %d issues closed\n",
+			cleanup.BranchesDeleted, cleanup.IssuesClosed)
+	}
+
+	return nil
+}
+
 // RunGroup executes all pending tasks in a group sequentially.
 // Each task gets its own cloned work directory.
 func (r *Runner) RunGroup(groupName string) error {

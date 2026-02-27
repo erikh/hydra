@@ -143,15 +143,26 @@ Executes the full task lifecycle:
 
 By default, hydra auto-accepts all tool calls and starts Claude in plan mode.
 
-### `hydra run-group <group-name>`
+### `hydra group`
 
-Executes all pending tasks in the named group sequentially, in alphabetical order. Each task gets its own cloned work directory. Stops on the first error.
+Manage and run task groups.
 
-**Flags:**
+```sh
+hydra group list                   # List available groups
+hydra group tasks <group-name>     # List all tasks in a group (all states)
+hydra group run <group-name>       # Run all pending tasks in a group sequentially
+hydra group merge <group-name>     # Merge all review/merge tasks in a group sequentially
+```
 
-- `--no-auto-accept` / `-Y` — Disable auto-accept (prompt for each tool call)
-- `--no-plan` / `-P` — Disable plan mode
-- `--model` — Override the Claude model
+`hydra group list` discovers and prints unique group names from pending tasks.
+
+`hydra group tasks` shows all tasks in the named group across all states, with state labels.
+
+`hydra group run` executes all pending tasks in the named group in alphabetical order. Each task gets its own cloned work directory. Stops on the first error.
+
+`hydra group merge` merges all tasks in review or merge state in the named group, in alphabetical order. Each task rebases onto the updated main. Stops on the first error.
+
+**`run` and `merge` flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 
 ### `hydra review`
 
@@ -246,7 +257,7 @@ The workflow:
 3. Opens a Claude session where Claude reads the code and runs tests
 4. Claude creates `verify-passed.txt` if all requirements are met, or `verify-failed.txt` listing failures
 
-If verification passes, prints a success message. If it fails, prints the failure details and exits with an error.
+If verification passes, prints a success message and automatically runs a sync (importing open issues and cleaning up completed tasks). If sync fails, a warning is printed but the verify command still succeeds. If verification fails, prints the failure details and exits with an error.
 
 **Flags:** `--no-auto-accept` / `-Y`, `--no-plan` / `-P`, `--model`
 

@@ -64,6 +64,9 @@ func (r *Runner) Verify() error {
 
 	if _, err := os.Stat(passedPath); err == nil {
 		fmt.Println("All functional requirements verified.")
+		if syncErr := r.Sync(nil); syncErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: post-verify sync failed: %v\n", syncErr)
+		}
 		return nil
 	}
 
