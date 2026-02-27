@@ -179,6 +179,12 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
+
+		b.WriteString("### Conflict Resolution Report\n\n")
+		b.WriteString("After all conflicts are resolved and the rebase is complete, " +
+			"print a summary of every conflict resolution decision you made. " +
+			"For each conflicted file, explain which side you kept (ours, theirs, or a manual merge) " +
+			"and why. This helps the reviewer understand what changed during the merge.\n\n")
 	}
 
 	b.WriteString("## Commit Message Validation\n\n")
