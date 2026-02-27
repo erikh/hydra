@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2940,5 +2941,93 @@ func TestReviewListShowsGroupedTasks(t *testing.T) {
 		for _, task := range tasks {
 			t.Logf("  found: %s (group=%s)", task.Name, task.Group)
 		}
+	}
+}
+
+func TestReviewListShowsMergeStateTasks(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run a task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Move task from review to merge manually.
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := r.Design.FindTaskByState("add-feature", design.StateReview)
+	if err != nil {
+		t.Fatalf("FindTaskByState: %v", err)
+	}
+	if err := r.Design.MoveTask(task, design.StateMerge); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	// Capture ReviewList output.
+	old := os.Stdout
+	rd, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := r.ReviewList(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("ReviewList: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(rd)
+
+	if !strings.Contains(string(out), "add-feature") {
+		t.Errorf("ReviewList should show merge-state task, got: %q", string(out))
+	}
+}
+
+func TestMergeListShowsReviewStateTasks(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Claude = mockClaude
+	r.BaseDir = env.BaseDir
+
+	// Run a task to move it to review.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	r, err = New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture MergeList output — task is in review state.
+	old := os.Stdout
+	rd, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := r.MergeList(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("MergeList: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(rd)
+
+	if !strings.Contains(string(out), "add-feature") {
+		t.Errorf("MergeList should show review-state task, got: %q", string(out))
 	}
 }

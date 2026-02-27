@@ -348,26 +348,9 @@ func (r *Runner) MergeGroup(groupName string) error {
 	return nil
 }
 
-// MergeList prints tasks in merge state.
+// MergeList prints tasks in review or merge state.
 func (r *Runner) MergeList() error {
-	tasks, err := r.Design.TasksByState(design.StateMerge)
-	if err != nil {
-		return err
-	}
-
-	if len(tasks) == 0 {
-		fmt.Println("No tasks in merge state.")
-		return nil
-	}
-
-	for _, t := range tasks {
-		label := t.Name
-		if t.Group != "" {
-			label = t.Group + "/" + t.Name
-		}
-		fmt.Println(label)
-	}
-	return nil
+	return r.listReviewMergeTasks("No tasks in review or merge state.")
 }
 
 // MergeView prints the content of a task in merge state.

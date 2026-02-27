@@ -292,6 +292,37 @@ func (r *Runner) Run(taskName string) error {
 	return nil
 }
 
+// listReviewMergeTasks prints tasks in both review and merge states.
+// Review and merge share the same task pool since merge is a continuation of review.
+func (r *Runner) listReviewMergeTasks(emptyMsg string) error {
+	var all []design.Task
+	for _, state := range []design.TaskState{design.StateReview, design.StateMerge} {
+		tasks, err := r.Design.TasksByState(state)
+		if err != nil {
+			return err
+		}
+		all = append(all, tasks...)
+	}
+
+	if len(all) == 0 {
+		fmt.Println(emptyMsg)
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	for _, t := range all {
+		label := t.Name
+		if t.Group != "" {
+			label = t.Group + "/" + t.Name
+		}
+		if !seen[label] {
+			seen[label] = true
+			fmt.Println(label)
+		}
+	}
+	return nil
+}
+
 // GroupList prints all unique group names from pending tasks.
 func (r *Runner) GroupList() error {
 	tasks, err := r.Design.PendingTasks()

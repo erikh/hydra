@@ -219,24 +219,7 @@ func (r *Runner) assembleReviewDocument(taskContent string) (string, error) {
 
 // ReviewList prints tasks in review state.
 func (r *Runner) ReviewList() error {
-	tasks, err := r.Design.TasksByState(design.StateReview)
-	if err != nil {
-		return err
-	}
-
-	if len(tasks) == 0 {
-		fmt.Println("No tasks in review.")
-		return nil
-	}
-
-	for _, t := range tasks {
-		label := t.Name
-		if t.Group != "" {
-			label = t.Group + "/" + t.Name
-		}
-		fmt.Println(label)
-	}
-	return nil
+	return r.listReviewMergeTasks("No tasks in review or merge state.")
 }
 
 // ReviewView prints the content of a task in review state.

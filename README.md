@@ -172,7 +172,7 @@ hydra group merge <group-name>     # Merge all review/merge tasks in a group seq
 Manage and run interactive review sessions on tasks that have been run.
 
 ```sh
-hydra review list                  # List tasks in review state
+hydra review list                  # List tasks in review or merge state
 hydra review view <task-name>      # Print task content
 hydra review edit <task-name>      # Open task in editor
 hydra review rm <task-name>        # Move task to abandoned
@@ -219,7 +219,7 @@ The task can be in any state (pending, review, merge, completed, or abandoned). 
 Manage and run the merge workflow for reviewed tasks.
 
 ```sh
-hydra merge list                   # List tasks in merge state
+hydra merge list                   # List tasks in review or merge state
 hydra merge view <task-name>       # Print task content
 hydra merge edit <task-name>       # Open task in editor
 hydra merge rm <task-name>         # Move task to abandoned
