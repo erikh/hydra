@@ -232,6 +232,19 @@ func (r *Runner) Run(taskName string) error {
 		return err
 	}
 
+	// Rebase onto latest remote main if requested (only if clean tree).
+	var conflictFiles []string
+	dirty, err := taskRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if r.Rebase && !dirty {
+		conflictFiles, err = r.attemptRebase(taskRepo)
+		if err != nil {
+			return fmt.Errorf("rebasing onto main: %w", err)
+		}
+	}
+
 	// Read task content and assemble document
 	content, err := task.Content()
 	if err != nil {
@@ -247,6 +260,8 @@ func (r *Runner) Run(taskName string) error {
 	if err != nil {
 		return fmt.Errorf("assembling document: %w", err)
 	}
+
+	doc += conflictResolutionSection(conflictFiles)
 
 	// Append verification and commit instructions so Claude handles test/lint/commit.
 	sign := taskRepo.HasSigningKey()

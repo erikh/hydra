@@ -58,12 +58,7 @@ func (r *Runner) Merge(taskName string) error {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
-	// Step 1: Fetch origin to get latest remote state.
-	if err := taskRepo.Fetch(); err != nil {
-		return fmt.Errorf("fetching origin: %w", err)
-	}
-
-	// Step 2: Checkout the task's branch (skip if working tree is dirty).
+	// Step 1: Checkout the task's branch (skip if working tree is dirty).
 	branch := task.BranchName()
 	if !taskRepo.BranchExists(branch) {
 		return fmt.Errorf("task branch %q does not exist", branch)
@@ -156,11 +151,16 @@ func (r *Runner) findMergeTask(taskName string) (*design.Task, error) {
 	return task, nil
 }
 
-// attemptRebase detects the default branch and attempts to rebase onto
-// origin/<default>. The caller must have already fetched. If the rebase has
-// conflicts, it aborts the rebase and returns the list of conflicted files.
-// On success, returns an empty list.
+// attemptRebase fetches origin, detects the default branch, and attempts to
+// rebase onto origin/<default>. If the rebase has conflicts, it aborts the
+// rebase and returns the list of conflicted files. On success, returns an
+// empty list.
 func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
+	// Always fetch origin before rebasing to ensure we have latest refs.
+	if err := taskRepo.Fetch(); err != nil {
+		return nil, fmt.Errorf("fetching origin before rebase: %w", err)
+	}
+
 	defaultBranch, err := r.detectDefaultBranch(taskRepo)
 	if err != nil {
 		return nil, fmt.Errorf("detecting default branch: %w", err)
@@ -230,25 +230,9 @@ func (r *Runner) assembleMergeDocument(taskContent string, conflictFiles []strin
 	b.WriteString(taskContent)
 	b.WriteString("\n\n")
 
-	// Conflict resolution section (only if there are conflicts).
+	b.WriteString(conflictResolutionSection(conflictFiles))
+
 	if len(conflictFiles) > 0 {
-		b.WriteString("## Conflict Resolution\n\n")
-		b.WriteString("A rebase of this branch onto origin/main was attempted but resulted in conflicts. " +
-			"The rebase has been aborted. You must:\n\n")
-		b.WriteString("1. Run `git rebase origin/main`\n")
-		b.WriteString("2. Resolve the conflicts in the files listed below\n")
-		b.WriteString("3. Stage resolved files with `git add`\n")
-		b.WriteString("4. Run `git rebase --continue`\n")
-		b.WriteString("5. Repeat until the rebase is complete\n\n")
-
-		b.WriteString("### Conflicted Files\n\n")
-		for _, f := range conflictFiles {
-			b.WriteString("- ")
-			b.WriteString(f)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-
 		b.WriteString("### Conflict Resolution Report\n\n")
 		b.WriteString("After all conflicts are resolved and the rebase is complete, " +
 			"print a summary of every conflict resolution decision you made. " +

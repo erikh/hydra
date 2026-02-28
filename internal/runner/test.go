@@ -53,13 +53,11 @@ func (r *Runner) Test(taskName string) error {
 	}
 
 	// Rebase onto latest remote main if requested.
+	var conflictFiles []string
 	if r.Rebase {
-		conflictFiles, err := r.attemptRebase(taskRepo)
+		conflictFiles, err = r.attemptRebase(taskRepo)
 		if err != nil {
 			return fmt.Errorf("rebasing onto main: %w", err)
-		}
-		if len(conflictFiles) > 0 {
-			return fmt.Errorf("rebase conflicts — resolve manually before running tests: %v", conflictFiles)
 		}
 	}
 
@@ -70,7 +68,7 @@ func (r *Runner) Test(taskName string) error {
 	}
 
 	cmds := r.commandsMap(wd)
-	doc, err := r.assembleTestDocument(content)
+	doc, err := r.assembleTestDocument(content, conflictFiles)
 	if err != nil {
 		return fmt.Errorf("assembling test document: %w", err)
 	}
@@ -141,7 +139,7 @@ func (r *Runner) Test(taskName string) error {
 }
 
 // assembleTestDocument builds a document for the test session.
-func (r *Runner) assembleTestDocument(taskContent string) (string, error) {
+func (r *Runner) assembleTestDocument(taskContent string, conflictFiles []string) (string, error) {
 	rules, err := r.Design.Rules()
 	if err != nil {
 		return "", err
@@ -172,6 +170,8 @@ func (r *Runner) assembleTestDocument(taskContent string) (string, error) {
 	b.WriteString("# Task Description\n\n")
 	b.WriteString(taskContent)
 	b.WriteString("\n\n")
+
+	b.WriteString(conflictResolutionSection(conflictFiles))
 
 	b.WriteString("# Test Instructions\n\n")
 	b.WriteString("You are adding tests for an implementation of the above task. ")

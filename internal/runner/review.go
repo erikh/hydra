@@ -87,17 +87,15 @@ func (r *Runner) Review(taskName string) error {
 	}
 
 	// Rebase onto latest remote main if requested (only if clean tree).
+	var conflictFiles []string
 	dirty, err := taskRepo.HasChanges()
 	if err != nil {
 		return fmt.Errorf("checking working tree: %w", err)
 	}
 	if r.Rebase && !dirty {
-		conflictFiles, err := r.attemptRebase(taskRepo)
+		conflictFiles, err = r.attemptRebase(taskRepo)
 		if err != nil {
 			return fmt.Errorf("rebasing onto main: %w", err)
-		}
-		if len(conflictFiles) > 0 {
-			return fmt.Errorf("rebase conflicts — resolve manually before reviewing: %v", conflictFiles)
 		}
 	}
 
@@ -107,7 +105,7 @@ func (r *Runner) Review(taskName string) error {
 		return err
 	}
 
-	doc, err := r.assembleReviewDocument(content)
+	doc, err := r.assembleReviewDocument(content, conflictFiles)
 	if err != nil {
 		return fmt.Errorf("assembling review document: %w", err)
 	}
@@ -180,7 +178,7 @@ func (r *Runner) Review(taskName string) error {
 }
 
 // assembleReviewDocument builds a document for the review session.
-func (r *Runner) assembleReviewDocument(taskContent string) (string, error) {
+func (r *Runner) assembleReviewDocument(taskContent string, conflictFiles []string) (string, error) {
 	rules, err := r.Design.Rules()
 	if err != nil {
 		return "", err
@@ -202,6 +200,8 @@ func (r *Runner) assembleReviewDocument(taskContent string) (string, error) {
 	}
 
 	doc += "# Task\n\n" + taskContent + "\n\n"
+
+	doc += conflictResolutionSection(conflictFiles)
 
 	doc += "# Review Instructions\n\n"
 	doc += "You are reviewing an implementation of the above task. " +

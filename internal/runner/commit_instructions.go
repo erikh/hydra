@@ -6,6 +6,33 @@ import (
 	"time"
 )
 
+// conflictResolutionSection returns a markdown section instructing Claude to
+// resolve rebase conflicts. Returns empty string if there are no conflicts.
+func conflictResolutionSection(conflictFiles []string) string {
+	if len(conflictFiles) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n## Conflict Resolution\n\n")
+	b.WriteString("A rebase of this branch onto origin/main was attempted but resulted in conflicts. " +
+		"The rebase has been aborted. You must:\n\n")
+	b.WriteString("1. Run `git rebase origin/main`\n")
+	b.WriteString("2. Resolve the conflicts in the files listed below\n")
+	b.WriteString("3. Stage resolved files with `git add`\n")
+	b.WriteString("4. Run `git rebase --continue`\n")
+	b.WriteString("5. Repeat until the rebase is complete\n\n")
+
+	b.WriteString("### Conflicted Files\n\n")
+	for _, f := range conflictFiles {
+		b.WriteString("- ")
+		b.WriteString(f)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 // verificationSection returns a markdown section listing the test and lint
 // commands Claude should run before committing. Returns empty string if
 // no commands are configured.

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -116,6 +117,7 @@ func mkdirAll(t *testing.T, path string) {
 }
 
 const testGroupBackend = "backend"
+const testBranchAddFeature = "hydra/add-feature"
 
 // stubRunner creates a minimal *Runner whose Design dir contains rules.md and lint.md.
 // Useful for unit-testing assemble*Document methods without a full test environment.
@@ -215,8 +217,8 @@ func TestRunFullWorkflow(t *testing.T) {
 		t.Fatalf("getting branch: %v", err)
 	}
 	branch := strings.TrimSpace(string(out))
-	if branch != "hydra/add-feature" {
-		t.Errorf("branch = %q, want hydra/add-feature", branch)
+	if branch != testBranchAddFeature {
+		t.Errorf("branch = %q, want %s", branch, testBranchAddFeature)
 	}
 
 	// Verify the generated file was committed.
@@ -250,7 +252,7 @@ func TestRunFullWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git branch: %v", err)
 	}
-	if !strings.Contains(string(remoteOut), "hydra/add-feature") {
+	if !strings.Contains(string(remoteOut), testBranchAddFeature) {
 		t.Errorf("branch not pushed to remote, branches: %s", remoteOut)
 	}
 
@@ -1168,7 +1170,7 @@ func TestMergeUsesRebase(t *testing.T) {
 	}
 
 	// Verify the task branch commit is an ancestor of main.
-	err = exec.CommandContext(context.Background(), "git", "-C", wd, "merge-base", "--is-ancestor", "hydra/add-feature", "main").Run() //nolint:gosec // test
+	err = exec.CommandContext(context.Background(), "git", "-C", wd, "merge-base", "--is-ancestor", testBranchAddFeature, "main").Run() //nolint:gosec // test
 	if err != nil {
 		t.Error("task branch should be an ancestor of main after rebase")
 	}
@@ -1329,7 +1331,7 @@ func TestMergeDocumentExclusiveCommands(t *testing.T) {
 
 func TestTestDocumentDoesNotContainTestLintCommands(t *testing.T) {
 	r := stubRunner(t)
-	result, err := r.assembleTestDocument("Task content")
+	result, err := r.assembleTestDocument("Task content", nil)
 	if err != nil {
 		t.Fatalf("assembleTestDocument: %v", err)
 	}
@@ -1605,7 +1607,7 @@ func TestReviewCommitsAndPushes(t *testing.T) {
 		t.Fatalf("git rev-parse: %v", err)
 	}
 
-	remoteSHA, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "rev-parse", "hydra/add-feature").Output() //nolint:gosec // test
+	remoteSHA, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "rev-parse", testBranchAddFeature).Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git rev-parse remote: %v", err)
 	}
@@ -1915,7 +1917,7 @@ func TestTestPushesChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git rev-parse local: %v", err)
 	}
-	remoteSHA, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "rev-parse", "hydra/add-feature").Output() //nolint:gosec // test
+	remoteSHA, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "rev-parse", testBranchAddFeature).Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git rev-parse remote: %v", err)
 	}
@@ -2985,7 +2987,7 @@ func TestMergeClaudeRunsOnFeatureBranch(t *testing.T) {
 			t.Fatalf("git rev-parse in Claude: %v", err)
 		}
 		branch := strings.TrimSpace(string(out))
-		if branch != "hydra/add-feature" {
+		if branch != testBranchAddFeature {
 			t.Errorf("Claude invoked on branch %q, want hydra/add-feature", branch)
 		}
 		return nil
@@ -3490,5 +3492,413 @@ func TestFixStuckMergeTasksMovedToReview(t *testing.T) {
 	_, err = r.Design.FindTaskByState("add-feature", design.StateReview)
 	if err != nil {
 		t.Errorf("stuck merge task should have been moved back to review: %v", err)
+	}
+}
+
+func TestConflictResolutionSectionEmpty(t *testing.T) {
+	result := conflictResolutionSection(nil)
+	if result != "" {
+		t.Error("conflictResolutionSection should return empty string for nil files")
+	}
+
+	result = conflictResolutionSection([]string{})
+	if result != "" {
+		t.Error("conflictResolutionSection should return empty string for empty slice")
+	}
+}
+
+func TestConflictResolutionSectionContent(t *testing.T) {
+	result := conflictResolutionSection([]string{"main.go", "config.go"})
+
+	if !strings.Contains(result, "Conflict Resolution") {
+		t.Error("missing Conflict Resolution heading")
+	}
+	if !strings.Contains(result, "git rebase origin/main") {
+		t.Error("missing rebase instruction")
+	}
+	if !strings.Contains(result, "git rebase --continue") {
+		t.Error("missing rebase --continue instruction")
+	}
+	if !strings.Contains(result, "- main.go") {
+		t.Error("missing conflict file main.go")
+	}
+	if !strings.Contains(result, "- config.go") {
+		t.Error("missing conflict file config.go")
+	}
+}
+
+func TestReviewDocumentWithConflicts(t *testing.T) {
+	r := stubRunner(t)
+	conflictFiles := []string{"handler.go"}
+	result, err := r.assembleReviewDocument("Task content", conflictFiles)
+	if err != nil {
+		t.Fatalf("assembleReviewDocument: %v", err)
+	}
+
+	if !strings.Contains(result, "Conflict Resolution") {
+		t.Error("review document missing Conflict Resolution section")
+	}
+	if !strings.Contains(result, "handler.go") {
+		t.Error("review document missing conflict file")
+	}
+	if !strings.Contains(result, "git rebase origin/main") {
+		t.Error("review document missing rebase instruction")
+	}
+}
+
+func TestReviewDocumentWithoutConflicts(t *testing.T) {
+	r := stubRunner(t)
+	result, err := r.assembleReviewDocument("Task content", nil)
+	if err != nil {
+		t.Fatalf("assembleReviewDocument: %v", err)
+	}
+
+	if strings.Contains(result, "Conflict Resolution") {
+		t.Error("review document should not contain Conflict Resolution when no conflicts")
+	}
+}
+
+func TestTestDocumentWithConflicts(t *testing.T) {
+	r := stubRunner(t)
+	conflictFiles := []string{"service.go"}
+	result, err := r.assembleTestDocument("Task content", conflictFiles)
+	if err != nil {
+		t.Fatalf("assembleTestDocument: %v", err)
+	}
+
+	if !strings.Contains(result, "Conflict Resolution") {
+		t.Error("test document missing Conflict Resolution section")
+	}
+	if !strings.Contains(result, "service.go") {
+		t.Error("test document missing conflict file")
+	}
+}
+
+func TestTestDocumentWithoutConflicts(t *testing.T) {
+	r := stubRunner(t)
+	result, err := r.assembleTestDocument("Task content", nil)
+	if err != nil {
+		t.Fatalf("assembleTestDocument: %v", err)
+	}
+
+	if strings.Contains(result, "Conflict Resolution") {
+		t.Error("test document should not contain Conflict Resolution when no conflicts")
+	}
+}
+
+func TestAttemptRebaseFetchesOrigin(t *testing.T) {
+	// Set up env with a bare remote.
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Claude = mockClaude
+
+	// Run the task to create a feature branch and push it.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Now push a new commit directly to the bare remote's main branch.
+	// This creates divergence that can only be seen by fetching.
+	pushDir := filepath.Join(t.TempDir(), "push-repo")
+	gitRun(t, "clone", env.BareDir, pushDir)
+	gitRun(t, "-C", pushDir, "config", "user.email", "test@test.com")
+	gitRun(t, "-C", pushDir, "config", "user.name", "Test")
+	gitRun(t, "-C", pushDir, "config", "commit.gpgsign", "false")
+	writeFile(t, filepath.Join(pushDir, "upstream-change.txt"), "upstream")
+	gitRun(t, "-C", pushDir, "add", "-A")
+	gitRun(t, "-C", pushDir, "commit", "-m", "upstream commit")
+	gitRun(t, "-C", pushDir, "push", "origin", "main")
+
+	// Open the work directory repo (without fetching manually).
+	wd := workDirForTask(env.BaseDir)
+	taskRepo := repo.Open(wd)
+
+	// Checkout the feature branch.
+	branch := testBranchAddFeature
+	if err := taskRepo.Checkout(branch); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+
+	// attemptRebase should fetch origin itself and detect the divergence.
+	conflictFiles, err := r.attemptRebase(taskRepo)
+	if err != nil {
+		t.Fatalf("attemptRebase: %v", err)
+	}
+
+	// No conflicts expected — the upstream change is in a different file.
+	if len(conflictFiles) != 0 {
+		t.Errorf("expected no conflicts, got: %v", conflictFiles)
+	}
+
+	// Verify the upstream commit is now an ancestor of HEAD (rebase incorporated it).
+	if !taskRepo.IsAncestor("origin/main", "HEAD") {
+		t.Error("after rebase, origin/main should be ancestor of HEAD")
+	}
+}
+
+func TestAttemptRebaseWithConflicts(t *testing.T) {
+	// Set up env.
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Use a mock claude that modifies README.md (which also exists upstream).
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "README.md"), []byte("# Feature branch\n"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+
+	// Run the task.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Push a conflicting change to the bare remote.
+	pushDir := filepath.Join(t.TempDir(), "push-repo")
+	gitRun(t, "clone", env.BareDir, pushDir)
+	gitRun(t, "-C", pushDir, "config", "user.email", "test@test.com")
+	gitRun(t, "-C", pushDir, "config", "user.name", "Test")
+	gitRun(t, "-C", pushDir, "config", "commit.gpgsign", "false")
+	writeFile(t, filepath.Join(pushDir, "README.md"), "# Upstream change\n")
+	gitRun(t, "-C", pushDir, "add", "-A")
+	gitRun(t, "-C", pushDir, "commit", "-m", "upstream conflicting commit")
+	gitRun(t, "-C", pushDir, "push", "origin", "main")
+
+	// Open work dir and checkout feature branch.
+	wd := workDirForTask(env.BaseDir)
+	taskRepo := repo.Open(wd)
+	if err := taskRepo.Checkout(testBranchAddFeature); err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+
+	// attemptRebase should detect conflicts and return them.
+	conflictFiles, err := r.attemptRebase(taskRepo)
+	if err != nil {
+		t.Fatalf("attemptRebase: %v", err)
+	}
+
+	if len(conflictFiles) == 0 {
+		t.Error("expected conflicts, got none")
+	}
+
+	// Verify README.md is in the conflict list.
+	if !slices.Contains(conflictFiles, "README.md") {
+		t.Errorf("expected README.md in conflict files, got: %v", conflictFiles)
+	}
+}
+
+func TestRunRebaseConditional(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Rebase = false
+	r.Claude = mockClaude
+
+	// Run without rebase — should succeed.
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run without rebase failed: %v", err)
+	}
+}
+
+func TestRunDocumentIncludesConflictSection(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Push an upstream change to README.md that will conflict.
+	pushDir := filepath.Join(t.TempDir(), "push-repo")
+	gitRun(t, "clone", env.BareDir, pushDir)
+	gitRun(t, "-C", pushDir, "config", "user.email", "test@test.com")
+	gitRun(t, "-C", pushDir, "config", "user.name", "Test")
+	gitRun(t, "-C", pushDir, "config", "commit.gpgsign", "false")
+	writeFile(t, filepath.Join(pushDir, "README.md"), "# Upstream\n")
+	gitRun(t, "-C", pushDir, "add", "-A")
+	gitRun(t, "-C", pushDir, "commit", "-m", "upstream conflict")
+	gitRun(t, "-C", pushDir, "push", "origin", "main")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Rebase = true
+
+	// First run: create the feature branch with a conflicting README.md.
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "README.md"), []byte("# Feature\n"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	// Push another conflicting change for the second task.
+	writeFile(t, filepath.Join(pushDir, "README.md"), "# Upstream v2\n")
+	gitRun(t, "-C", pushDir, "add", "-A")
+	gitRun(t, "-C", pushDir, "commit", "-m", "upstream conflict v2")
+	gitRun(t, "-C", pushDir, "push", "origin", "main")
+
+	// Run another-task which will also modify README.md and hit conflicts.
+	var captured string
+	r2, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.BaseDir = env.BaseDir
+	r2.Rebase = true
+
+	// First run of another-task creates a branch with conflicting change.
+	r2.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "README.md"), []byte("# Another\n"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+	if err := r2.Run("another-task"); err != nil {
+		t.Fatalf("first Run another-task: %v", err)
+	}
+
+	// Push yet another conflict.
+	writeFile(t, filepath.Join(pushDir, "README.md"), "# Upstream v3\n")
+	gitRun(t, "-C", pushDir, "add", "-A")
+	gitRun(t, "-C", pushDir, "commit", "-m", "upstream conflict v3")
+	gitRun(t, "-C", pushDir, "push", "origin", "main")
+
+	// Move another-task back to pending by abandoning and recreating.
+	r3, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := r3.Design.FindTaskByState("another-task", design.StateReview)
+	if err != nil {
+		t.Fatalf("FindTaskByState: %v", err)
+	}
+	if err := r3.Design.MoveTask(task, design.StateAbandoned); err != nil {
+		t.Fatalf("MoveTask to abandoned: %v", err)
+	}
+	// Recreate the task in pending.
+	writeFile(t, filepath.Join(env.DesignDir, "tasks", "another-task.md"), "Do another thing.")
+
+	r4, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r4.BaseDir = env.BaseDir
+	r4.Rebase = true
+	r4.Claude = mockClaudeCapture(&captured)
+
+	if err := r4.Run("another-task"); err != nil {
+		t.Fatalf("second Run another-task: %v", err)
+	}
+
+	if !strings.Contains(captured, "Conflict Resolution") {
+		t.Error("Run document should contain Conflict Resolution section when rebase has conflicts")
+	}
+	if !strings.Contains(captured, "README.md") {
+		t.Error("Run document should list README.md as conflicted file")
+	}
+}
+
+// setupConflictEnv creates a test environment with a feature branch that
+// has a conflicting change on origin/main. Returns the env and the captured
+// document pointer.
+func setupConflictEnv(t *testing.T) *testEnv {
+	t.Helper()
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BaseDir = env.BaseDir
+	r.Rebase = true
+
+	// First run creates feature branch with a conflicting README.md change.
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		if err := os.WriteFile(filepath.Join(cfg.RepoDir, "README.md"), []byte("# Feature\n"), 0o600); err != nil {
+			return err
+		}
+		return mockCommit(cfg.RepoDir)
+	}
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Push conflicting change to origin.
+	pushDir := filepath.Join(t.TempDir(), "push-repo")
+	gitRun(t, "clone", env.BareDir, pushDir)
+	gitRun(t, "-C", pushDir, "config", "user.email", "test@test.com")
+	gitRun(t, "-C", pushDir, "config", "user.name", "Test")
+	gitRun(t, "-C", pushDir, "config", "commit.gpgsign", "false")
+	writeFile(t, filepath.Join(pushDir, "README.md"), "# Upstream\n")
+	gitRun(t, "-C", pushDir, "add", "-A")
+	gitRun(t, "-C", pushDir, "commit", "-m", "upstream conflict")
+	gitRun(t, "-C", pushDir, "push", "origin", "main")
+
+	return env
+}
+
+func TestReviewPassesConflictsToClaude(t *testing.T) {
+	env := setupConflictEnv(t)
+
+	var captured string
+	r2, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.BaseDir = env.BaseDir
+	r2.Rebase = true
+	r2.Claude = mockClaudeCapture(&captured)
+
+	// Review should NOT abort — it should pass conflicts to Claude.
+	if err := r2.Review("add-feature"); err != nil {
+		t.Fatalf("Review should not abort on conflicts, got: %v", err)
+	}
+
+	if !strings.Contains(captured, "Conflict Resolution") {
+		t.Error("Review document should contain Conflict Resolution section")
+	}
+	if !strings.Contains(captured, "README.md") {
+		t.Error("Review document should list README.md as conflicted file")
+	}
+}
+
+func TestTestPassesConflictsToClaude(t *testing.T) {
+	env := setupConflictEnv(t)
+
+	var captured string
+	r2, err := New(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.BaseDir = env.BaseDir
+	r2.Rebase = true
+	r2.Claude = mockClaudeCapture(&captured)
+
+	// Test should NOT abort — it should pass conflicts to Claude.
+	if err := r2.Test("add-feature"); err != nil {
+		t.Fatalf("Test should not abort on conflicts, got: %v", err)
+	}
+
+	if !strings.Contains(captured, "Conflict Resolution") {
+		t.Error("Test document should contain Conflict Resolution section")
+	}
+	if !strings.Contains(captured, "README.md") {
+		t.Error("Test document should list README.md as conflicted file")
 	}
 }
