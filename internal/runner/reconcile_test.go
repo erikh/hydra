@@ -131,6 +131,11 @@ func TestReconcileDocumentContents(t *testing.T) {
 	if !strings.Contains(captured, "# Instructions") {
 		t.Error("document missing Instructions section")
 	}
+
+	// Verify document establishes code as ground truth.
+	if !strings.Contains(captured, "ground truth") {
+		t.Error("document missing ground truth language")
+	}
 }
 
 func TestReconcilePreservesOtherStates(t *testing.T) {

@@ -117,15 +117,15 @@ func TestVerifyDocumentContents(t *testing.T) {
 		t.Error("document missing verify-failed.txt reference")
 	}
 
-	// Verify document contains absolute path to functional.md.
-	functionalPath := filepath.Join(env.DesignDir, "functional.md")
-	if !strings.Contains(captured, functionalPath) {
-		t.Errorf("document missing absolute path to functional.md (%s)", functionalPath)
+	// Verify document instructs Claude to fix code, not the spec.
+	if !strings.Contains(captured, "fix the code") {
+		t.Error("document missing 'fix the code' instruction")
 	}
-
-	// Verify document instructs Claude to update functional.md.
-	if !strings.Contains(captured, "Functional Specification Updates") {
-		t.Error("document missing Functional Specification Updates section")
+	if !strings.Contains(captured, "Do not modify the functional specification") {
+		t.Error("document missing 'Do not modify the functional specification' instruction")
+	}
+	if !strings.Contains(captured, "serially") {
+		t.Error("document missing serial test running instruction")
 	}
 
 	// Verify rules and lint are included.

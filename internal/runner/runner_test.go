@@ -2645,7 +2645,7 @@ func TestVerifyDocumentIncludesTestCoverage(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result, err := r.assembleVerifyDocument("Feature X must do Y.", "/tmp/design/functional.md", cmds)
+	result, err := r.assembleVerifyDocument("Feature X must do Y.", cmds)
 	if err != nil {
 		t.Fatalf("assembleVerifyDocument: %v", err)
 	}
@@ -2658,25 +2658,24 @@ func TestVerifyDocumentIncludesTestCoverage(t *testing.T) {
 	}
 }
 
-func TestVerifyDocumentIncludesFunctionalPath(t *testing.T) {
+func TestVerifyDocumentSpecIsAuthoritative(t *testing.T) {
 	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	path := "/home/user/project/design/functional.md"
-	result, err := r.assembleVerifyDocument("Feature X must do Y.", path, cmds)
+	result, err := r.assembleVerifyDocument("Feature X must do Y.", cmds)
 	if err != nil {
 		t.Fatalf("assembleVerifyDocument: %v", err)
 	}
 
-	if !strings.Contains(result, path) {
-		t.Error("verify document missing absolute path to functional.md")
+	if !strings.Contains(result, "fix the code") {
+		t.Error("verify document missing 'fix the code' instruction")
 	}
-	if !strings.Contains(result, "Functional Specification Updates") {
-		t.Error("verify document missing functional spec update section")
+	if !strings.Contains(result, "Do not modify the functional specification") {
+		t.Error("verify document missing 'Do not modify the functional specification' instruction")
 	}
-	if !strings.Contains(result, "not described") {
-		t.Error("verify document missing instruction to add undocumented functionality")
+	if strings.Contains(result, "Functional Specification Updates") {
+		t.Error("verify document should not contain Functional Specification Updates section")
 	}
 }
 

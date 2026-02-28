@@ -55,8 +55,7 @@ func (r *Runner) Verify() error {
 
 	// Assemble document.
 	cmds := r.commandsMap(wd)
-	functionalPath, _ := filepath.Abs(filepath.Join(r.Config.DesignDir, "functional.md"))
-	doc, err := r.assembleVerifyDocument(functional, functionalPath, cmds)
+	doc, err := r.assembleVerifyDocument(functional, cmds)
 	if err != nil {
 		return fmt.Errorf("assembling verify document: %w", err)
 	}
@@ -103,7 +102,7 @@ func (r *Runner) Verify() error {
 }
 
 // assembleVerifyDocument builds the prompt for the verify workflow.
-func (r *Runner) assembleVerifyDocument(functional, functionalPath string, cmds map[string]string) (string, error) {
+func (r *Runner) assembleVerifyDocument(functional string, cmds map[string]string) (string, error) {
 	rules, err := r.Design.Rules()
 	if err != nil {
 		return "", err
@@ -116,8 +115,8 @@ func (r *Runner) assembleVerifyDocument(functional, functionalPath string, cmds 
 
 	var b strings.Builder
 
-	b.WriteString("# Mission\n\nYour sole objective is to verify that every requirement in the functional specification " +
-		"below is satisfied by the current codebase.\n\n")
+	b.WriteString("# Mission\n\nYour objective is to verify that every requirement in the functional specification " +
+		"below is satisfied by the current codebase. If code does not match the specification, fix the code.\n\n")
 
 	if rules != "" {
 		b.WriteString("# Rules\n\n")
@@ -138,17 +137,9 @@ func (r *Runner) assembleVerifyDocument(functional, functionalPath string, cmds 
 	b.WriteString("For each requirement in the specification above:\n")
 	b.WriteString("1. Find the relevant code that implements it\n")
 	b.WriteString("2. Confirm the implementation matches the specification\n")
-	b.WriteString("3. Verify that the requirement has adequate test coverage — there should be tests that exercise the described behavior, including edge cases and error paths\n")
-	b.WriteString("4. Run the test suite to verify tests pass\n\n")
-
-	b.WriteString("## Functional Specification Updates\n\n")
-	b.WriteString("If the codebase contains functionality that is implemented and tested but not described " +
-		"in the functional specification above, update the functional specification file at:\n\n")
-	b.WriteString("`")
-	b.WriteString(functionalPath)
-	b.WriteString("`\n\n")
-	b.WriteString("Add any missing requirements that reflect the actual state of the codebase. " +
-		"This ensures the specification stays in sync with reality.\n\n")
+	b.WriteString("3. If the code does not satisfy a requirement, fix the code to match the specification\n")
+	b.WriteString("4. Verify that the requirement has adequate test coverage — there should be tests that exercise the described behavior, including edge cases and error paths\n")
+	b.WriteString("5. Run tests according to the hydra.yml test task, serially\n\n")
 
 	b.WriteString(verificationSection(cmds))
 
@@ -159,14 +150,12 @@ func (r *Runner) assembleVerifyDocument(functional, functionalPath string, cmds 
 		"create a file called `verify-failed.txt` listing each failed requirement and why it failed " +
 		"(including any that lack tests).\n\n")
 
-	b.WriteString("Do not modify any source code. Do not fix anything. " +
-		"The only file you may modify outside the work directory is `" + functionalPath + "`.\n")
+	b.WriteString("Do not modify the functional specification. " +
+		"The specification is the source of truth — if code does not match the specification, fix the code.\n")
 
 	b.WriteString("\n# Reminder\n\n")
-	b.WriteString("Your ONLY job is to verify the functional requirements. " +
-		"Do not make any code changes. You may update `" + functionalPath +
-		"` if the codebase has functionality not yet reflected in the specification. " +
-		"Create verify-passed.txt or verify-failed.txt.\n")
+	b.WriteString("The functional specification is authoritative. Fix code to match it, never the reverse. " +
+		"Create verify-passed.txt or verify-failed.txt when done.\n")
 
 	return b.String(), nil
 }
