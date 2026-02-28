@@ -16,18 +16,23 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/storer"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 )
 
 // Repo represents a local git repository.
 type Repo struct {
-	Dir  string
-	repo *git.Repository
+	Dir      string
+	repo     *git.Repository
+	auth     transport.AuthMethod
+	authDone bool
 }
 
 // Clone clones a git repository from url into dest.
 func Clone(url, dest string) (*Repo, error) {
 	r, err := git.PlainClone(dest, false, &git.CloneOptions{
-		URL: url,
+		URL:  url,
+		Auth: detectAuthFromURL(url),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("git clone: %w", err)
@@ -68,6 +73,52 @@ func (r *Repo) ensure() error {
 	}
 	r.repo = repo
 	return nil
+}
+
+// isSSHURL returns true if the URL uses an SSH transport.
+func isSSHURL(url string) bool {
+	return strings.HasPrefix(url, "git@") || strings.HasPrefix(url, "ssh://")
+}
+
+// resolveAuth lazily detects the remote URL scheme and sets auth for SSH remotes.
+func (r *Repo) resolveAuth() {
+	if r.authDone {
+		return
+	}
+	r.authDone = true
+	url, err := r.RemoteURL()
+	if err != nil {
+		return
+	}
+	if isSSHURL(url) {
+		auth, err := gitssh.NewSSHAgentAuth("git")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not set up SSH agent auth: %v\n", err)
+			return
+		}
+		r.auth = auth
+	}
+}
+
+// detectAuthFromURL returns SSH agent auth if the URL is an SSH remote.
+func detectAuthFromURL(url string) transport.AuthMethod {
+	if isSSHURL(url) {
+		auth, err := gitssh.NewSSHAgentAuth("git")
+		if err != nil {
+			return nil
+		}
+		return auth
+	}
+	return nil
+}
+
+// isHTTPS returns true if the origin remote uses HTTPS.
+func (r *Repo) isHTTPS() bool {
+	url, err := r.RemoteURL()
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://")
 }
 
 // commitIdentity returns the user name and email from repo config,
@@ -175,11 +226,21 @@ func (r *Repo) Push(branch string) error {
 	if err := r.ensure(); err != nil {
 		return err
 	}
+	r.resolveAuth()
+	if r.isHTTPS() {
+		_, err := r.run("push", "origin", branch)
+		return err
+	}
 	refSpec := config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))
-	return r.repo.Push(&git.PushOptions{
+	err := r.repo.Push(&git.PushOptions{
 		RemoteName: "origin",
 		RefSpecs:   []config.RefSpec{refSpec},
+		Auth:       r.auth,
 	})
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil
+	}
+	return err
 }
 
 // HasChanges returns true if the working tree has uncommitted changes.
@@ -250,8 +311,14 @@ func (r *Repo) Fetch() error {
 	if err := r.ensure(); err != nil {
 		return err
 	}
+	r.resolveAuth()
+	if r.isHTTPS() {
+		_, err := r.run("fetch", "origin")
+		return err
+	}
 	err := r.repo.Fetch(&git.FetchOptions{
 		RemoteName: "origin",
+		Auth:       r.auth,
 	})
 	if errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return nil
@@ -313,11 +380,21 @@ func (r *Repo) DeleteRemoteBranch(name string) error {
 	if err := r.ensure(); err != nil {
 		return err
 	}
+	r.resolveAuth()
+	if r.isHTTPS() {
+		_, err := r.run("push", "origin", "--delete", name)
+		return err
+	}
 	refSpec := config.RefSpec(":refs/heads/" + name)
-	return r.repo.Push(&git.PushOptions{
+	err := r.repo.Push(&git.PushOptions{
 		RemoteName: "origin",
 		RefSpecs:   []config.RefSpec{refSpec},
+		Auth:       r.auth,
 	})
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil
+	}
+	return err
 }
 
 // IsGitRepo returns true if dir contains a .git directory or file.
@@ -326,10 +403,28 @@ func IsGitRepo(dir string) bool {
 	return err == nil
 }
 
+// resolveCommit resolves a ref string to a Commit object.
+func (r *Repo) resolveCommit(ref string) (*object.Commit, error) {
+	if err := r.ensure(); err != nil {
+		return nil, err
+	}
+	hash, err := r.repo.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return nil, fmt.Errorf("resolve %q: %w", ref, err)
+	}
+	return r.repo.CommitObject(*hash)
+}
+
 // Clean removes untracked files and directories.
 func (r *Repo) Clean() error {
-	_, err := r.run("clean", "-fd")
-	return err
+	if err := r.ensure(); err != nil {
+		return err
+	}
+	w, err := r.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("worktree: %w", err)
+	}
+	return w.Clean(&git.CleanOptions{Dir: true})
 }
 
 // Rebase runs git rebase onto the given ref.
@@ -380,14 +475,48 @@ func (r *Repo) ConflictFiles() ([]string, error) {
 
 // ForcePushWithLease pushes the given branch with --force-with-lease.
 func (r *Repo) ForcePushWithLease(branch string) error {
-	_, err := r.run("push", "--force-with-lease", "origin", branch)
+	if err := r.ensure(); err != nil {
+		return err
+	}
+	r.resolveAuth()
+	if r.isHTTPS() {
+		_, err := r.run("push", "--force-with-lease", "origin", branch)
+		return err
+	}
+	refSpec := config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))
+	err := r.repo.Push(&git.PushOptions{
+		RemoteName:     "origin",
+		RefSpecs:       []config.RefSpec{refSpec},
+		ForceWithLease: &git.ForceWithLease{},
+		Auth:           r.auth,
+	})
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil
+	}
 	return err
 }
 
 // MergeFFOnly merges the given branch using fast-forward only.
 func (r *Repo) MergeFFOnly(branch string) error {
-	_, err := r.run("merge", "--ff-only", branch)
-	return err
+	if err := r.ensure(); err != nil {
+		return err
+	}
+	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+	if err != nil {
+		return fmt.Errorf("resolve branch %q: %w", branch, err)
+	}
+	if err := r.repo.Merge(*ref, git.MergeOptions{Strategy: git.FastForwardMerge}); err != nil {
+		return fmt.Errorf("merge --ff-only: %w", err)
+	}
+	// Merge only updates HEAD ref; reset worktree to match.
+	w, err := r.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("worktree: %w", err)
+	}
+	return w.Reset(&git.ResetOptions{
+		Mode:   git.HardReset,
+		Commit: ref.Hash(),
+	})
 }
 
 // PushMain pushes the main branch to origin.
@@ -395,8 +524,14 @@ func (r *Repo) PushMain() error {
 	if err := r.ensure(); err != nil {
 		return err
 	}
+	r.resolveAuth()
+	if r.isHTTPS() {
+		_, err := r.run("push", "origin")
+		return err
+	}
 	err := r.repo.Push(&git.PushOptions{
 		RemoteName: "origin",
+		Auth:       r.auth,
 	})
 	if errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return nil
@@ -433,8 +568,19 @@ func (r *Repo) Log(n int) (string, error) {
 
 // IsAncestor returns true if ancestor is an ancestor of ref.
 func (r *Repo) IsAncestor(ancestor, ref string) bool {
-	_, err := r.run("merge-base", "--is-ancestor", ancestor, ref)
-	return err == nil
+	ancestorCommit, err := r.resolveCommit(ancestor)
+	if err != nil {
+		return false
+	}
+	refCommit, err := r.resolveCommit(ref)
+	if err != nil {
+		return false
+	}
+	isAnc, err := ancestorCommit.IsAncestor(refCommit)
+	if err != nil {
+		return false
+	}
+	return isAnc
 }
 
 // RemoteURL returns the URL of the origin remote.
@@ -455,10 +601,44 @@ func (r *Repo) RemoteURL() (string, error) {
 
 // MergeBase returns the merge-base commit between two refs.
 func (r *Repo) MergeBase(a, b string) (string, error) {
-	return r.run("merge-base", a, b)
+	commitA, err := r.resolveCommit(a)
+	if err != nil {
+		return "", err
+	}
+	commitB, err := r.resolveCommit(b)
+	if err != nil {
+		return "", err
+	}
+	bases, err := commitA.MergeBase(commitB)
+	if err != nil {
+		return "", fmt.Errorf("merge-base: %w", err)
+	}
+	if len(bases) == 0 {
+		return "", errors.New("no merge base found")
+	}
+	return bases[0].Hash.String(), nil
 }
 
-// DiffRange runs git diff between two refs and returns the output.
+// DiffRange returns the diff between the merge-base of base..head and head.
 func (r *Repo) DiffRange(base, head string) (string, error) {
-	return r.run("diff", base+"..."+head)
+	baseCommit, err := r.resolveCommit(base)
+	if err != nil {
+		return "", err
+	}
+	headCommit, err := r.resolveCommit(head)
+	if err != nil {
+		return "", err
+	}
+	bases, err := baseCommit.MergeBase(headCommit)
+	if err != nil {
+		return "", fmt.Errorf("merge-base: %w", err)
+	}
+	if len(bases) == 0 {
+		return "", errors.New("no merge base found")
+	}
+	patch, err := bases[0].Patch(headCommit)
+	if err != nil {
+		return "", fmt.Errorf("patch: %w", err)
+	}
+	return patch.String(), nil
 }
