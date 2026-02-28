@@ -96,7 +96,12 @@ func (r *Runner) Fix(autoConfirm bool) error {
 	if !autoConfirm {
 		fmt.Printf("\nApply %d fix(es)? [y/N] ", len(actions))
 		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not read input: %v\n", err)
+			fmt.Println("Aborted.")
+			return nil
+		}
 		input = strings.TrimSpace(strings.ToLower(input))
 
 		if input != "y" && input != "yes" {
@@ -156,7 +161,12 @@ func (r *Runner) fixDuplicateTaskNames() (int, error) { //nolint:unparam // erro
 		fmt.Printf("  [s] skip (do nothing)\n")
 		fmt.Printf("Which copy to keep? ")
 
-		input, _ := reader.ReadString('\n')
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not read input: %v\n", err)
+			fmt.Printf("  Skipped.\n")
+			continue
+		}
 		input = strings.TrimSpace(input)
 
 		if input == "s" || input == "" {
@@ -196,7 +206,10 @@ func (r *Runner) scanStaleLocks(baseDir string) ([]fixAction, error) {
 	}
 
 	// Use ReadAll to get live locks, then compare against all lock files.
-	live, _ := lock.ReadAll(hydraDir)
+	live, err := lock.ReadAll(hydraDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading live locks: %w", err)
+	}
 
 	var actions []fixAction
 	for _, path := range matches {

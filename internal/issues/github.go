@@ -52,7 +52,7 @@ func (g *GitHubSource) FetchOpenIssues(ctx context.Context, labels []string) ([]
 		req.Header.Set("Authorization", "Bearer "+g.Token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is built from user-configured GitHub owner/repo
 	if err != nil {
 		return nil, fmt.Errorf("GitHub API request failed: %w", err)
 	}
@@ -130,7 +130,7 @@ func (g *GitHubSource) CloseIssue(number int, comment string) error {
 		if g.Token != "" {
 			req.Header.Set("Authorization", "Bearer "+g.Token)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is built from user-configured GitHub owner/repo
 		if err != nil {
 			return fmt.Errorf("posting comment: %w", err)
 		}
@@ -149,7 +149,7 @@ func (g *GitHubSource) CloseIssue(number int, comment string) error {
 		req.Header.Set("Authorization", "Bearer "+g.Token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is built from user-configured GitHub owner/repo
 	if err != nil {
 		return fmt.Errorf("closing issue: %w", err)
 	}

@@ -57,7 +57,7 @@ func (g *GiteaSource) FetchOpenIssues(ctx context.Context, labels []string) ([]I
 		req.Header.Set("Authorization", "token "+g.Token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is built from user-configured Gitea base URL
 	if err != nil {
 		return nil, fmt.Errorf("gitea API request failed: %w", err)
 	}
@@ -106,7 +106,7 @@ func (g *GiteaSource) CloseIssue(number int, comment string) error {
 		if g.Token != "" {
 			req.Header.Set("Authorization", "token "+g.Token)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is built from user-configured Gitea base URL
 		if err != nil {
 			return fmt.Errorf("posting comment: %w", err)
 		}
@@ -124,7 +124,7 @@ func (g *GiteaSource) CloseIssue(number int, comment string) error {
 		req.Header.Set("Authorization", "token "+g.Token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is built from user-configured Gitea base URL
 	if err != nil {
 		return fmt.Errorf("closing issue: %w", err)
 	}

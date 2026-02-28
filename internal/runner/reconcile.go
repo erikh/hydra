@@ -60,7 +60,11 @@ func (r *Runner) Reconcile() error {
 	if err := reconcileRepo.Fetch(); err != nil {
 		return fmt.Errorf("fetching origin: %w", err)
 	}
-	if dirty, _ := reconcileRepo.HasChanges(); !dirty {
+	dirty, err := reconcileRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if !dirty {
 		defaultBranch, err := r.detectDefaultBranch(reconcileRepo)
 		if err != nil {
 			return fmt.Errorf("detecting default branch: %w", err)

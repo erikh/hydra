@@ -40,7 +40,11 @@ func (r *Runner) Verify() error {
 	if err := verifyRepo.Fetch(); err != nil {
 		return fmt.Errorf("fetching origin: %w", err)
 	}
-	if dirty, _ := verifyRepo.HasChanges(); !dirty {
+	dirty, err := verifyRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if !dirty {
 		defaultBranch, err := r.detectDefaultBranch(verifyRepo)
 		if err != nil {
 			return fmt.Errorf("detecting default branch: %w", err)
@@ -64,7 +68,10 @@ func (r *Runner) Verify() error {
 	}
 
 	// Capture HEAD before invoking Claude.
-	beforeSHA, _ := verifyRepo.LastCommitSHA()
+	beforeSHA, err := verifyRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA: %w", err)
+	}
 
 	// Invoke Claude.
 	claudeFn := r.Claude
@@ -175,7 +182,10 @@ func (r *Runner) assembleVerifyDocument(functional string, sign bool, cmds map[s
 
 // pushVerifyFixes rebases and pushes if Claude committed changes during verify.
 func (r *Runner) pushVerifyFixes(verifyRepo *repo.Repo, beforeSHA string) error {
-	afterSHA, _ := verifyRepo.LastCommitSHA()
+	afterSHA, err := verifyRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA after verify: %w", err)
+	}
 	if afterSHA == beforeSHA {
 		return nil
 	}

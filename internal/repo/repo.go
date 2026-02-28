@@ -36,13 +36,18 @@ func Clone(url, dest string) (*Repo, error) {
 }
 
 // Open returns a Repo handle for an existing directory.
+// If the directory is not a valid git repo, the internal repo handle is left nil
+// and will be lazily opened by ensure().
 func Open(dir string) *Repo {
-	r, _ := git.PlainOpen(dir)
+	r, err := git.PlainOpen(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not open git repo at %s: %v\n", dir, err)
+	}
 	return &Repo{Dir: dir, repo: r}
 }
 
 func (r *Repo) run(args ...string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd := exec.CommandContext(context.Background(), "git", args...) //nolint:gosec // args are controlled internally
 	cmd.Dir = r.Dir
 	cmd.Env = append(os.Environ(), "GIT_EDITOR=true")
 	out, err := cmd.CombinedOutput()
@@ -68,8 +73,14 @@ func (r *Repo) ensure() error {
 // commitIdentity returns the user name and email from repo config,
 // falling back to global config.
 func (r *Repo) commitIdentity() (name, email string) {
-	localCfg, _ := r.repo.ConfigScoped(config.LocalScope)
-	globalCfg, _ := r.repo.ConfigScoped(config.GlobalScope)
+	localCfg, err := r.repo.ConfigScoped(config.LocalScope)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read local git config: %v\n", err)
+	}
+	globalCfg, err := r.repo.ConfigScoped(config.GlobalScope)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read global git config: %v\n", err)
+	}
 
 	if localCfg != nil {
 		name = localCfg.User.Name

@@ -51,7 +51,9 @@ func (l *Lock) Acquire() error {
 			return fmt.Errorf("task %q is already running (PID %d)", existing.TaskName, existing.PID)
 		}
 		// Stale lock, remove it.
-		_ = os.Remove(l.path)
+		if err := os.Remove(l.path); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not remove stale lock %s: %v\n", l.path, err)
+		}
 	}
 
 	data, err := json.Marshal(&lockData{

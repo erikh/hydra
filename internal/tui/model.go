@@ -219,7 +219,7 @@ func handleEvent(m *Model, msg eventMsg) []tea.Cmd {
 		if evt.IsError {
 			prefix = m.theme.ErrorStyle().Render("[err]")
 		}
-		m.output.WriteString(fmt.Sprintf("\n%s %s\n", prefix, truncate(evt.Content, 200)))
+		fmt.Fprintf(&m.output, "\n%s %s\n", prefix, truncate(evt.Content, 200))
 		m.viewport.SetContent(m.output.String())
 		m.viewport.GotoBottom()
 		cmds = append(cmds, m.waitForEvent())

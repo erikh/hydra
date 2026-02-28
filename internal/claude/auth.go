@@ -10,9 +10,9 @@ import (
 
 // Credentials holds the API authentication details.
 type Credentials struct {
-	APIKey       string
-	AccessToken  string
-	RefreshToken string
+	APIKey       string //nolint:gosec // not a hardcoded credential
+	AccessToken  string //nolint:gosec // not a hardcoded credential
+	RefreshToken string //nolint:gosec // not a hardcoded credential
 	ExpiresAt    int64
 }
 
@@ -53,8 +53,8 @@ func loadFromCredentialsFile() (*Credentials, error) {
 	}
 
 	var oauth struct {
-		AccessToken  string `json:"accessToken"`
-		RefreshToken string `json:"refreshToken"`
+		AccessToken  string `json:"accessToken"`  //nolint:gosec // not a hardcoded credential
+		RefreshToken string `json:"refreshToken"` //nolint:gosec // not a hardcoded credential
 		ExpiresAt    int64  `json:"expiresAt"`
 	}
 	if err := json.Unmarshal(oauthRaw, &oauth); err != nil {

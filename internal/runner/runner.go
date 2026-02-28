@@ -182,7 +182,9 @@ func (r *Runner) trySyncExisting(workDir string) (*repo.Repo, bool) {
 
 	// Not a git repo or sync failed; teardown and remove it.
 	r.runTeardown(workDir)
-	_ = os.RemoveAll(workDir)
+	if err := os.RemoveAll(workDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", workDir, err)
+	}
 	return nil, false
 }
 
@@ -263,7 +265,10 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	// Capture HEAD before invoking Claude.
-	beforeSHA, _ := taskRepo.LastCommitSHA()
+	beforeSHA, err := taskRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA: %w", err)
+	}
 
 	// Invoke claude
 	claudeFn := r.Claude
@@ -277,15 +282,16 @@ func (r *Runner) Run(taskName string) error {
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
 	}
-	claudeErr := claudeFn(context.Background(), runCfg)
+	if err := claudeFn(context.Background(), runCfg); err != nil {
+		return err
+	}
 
-	// Check if Claude committed (HEAD moved), even if Claude returned an error
-	// (e.g. terminated by signal after committing).
-	afterSHA, _ := taskRepo.LastCommitSHA()
+	// Check if Claude committed (HEAD moved).
+	afterSHA, err := taskRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA after claude: %w", err)
+	}
 	if afterSHA == beforeSHA {
-		if claudeErr != nil {
-			return claudeErr
-		}
 		return errors.New("claude produced no changes")
 	}
 
@@ -312,7 +318,10 @@ func (r *Runner) Run(taskName string) error {
 // is dirty, it skips branch operations and warns if the current branch
 // doesn't match the expected one.
 func (r *Runner) ensureBranch(taskRepo *repo.Repo, branch string) error {
-	dirty, _ := taskRepo.HasChanges()
+	dirty, err := taskRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
 	if !dirty {
 		if taskRepo.BranchExists(branch) {
 			return taskRepo.Checkout(branch)
@@ -322,7 +331,10 @@ func (r *Runner) ensureBranch(taskRepo *repo.Repo, branch string) error {
 
 	// Dirty tree — warn if on the wrong branch.
 	if taskRepo.BranchExists(branch) {
-		currentBranch, _ := taskRepo.CurrentBranch()
+		currentBranch, err := taskRepo.CurrentBranch()
+		if err != nil {
+			return fmt.Errorf("getting current branch: %w", err)
+		}
 		if currentBranch != branch {
 			fmt.Fprintf(os.Stderr, "Warning: working tree is dirty and on %s, expected %s; letting Claude continue\n", currentBranch, branch)
 		}

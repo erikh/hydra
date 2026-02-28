@@ -95,7 +95,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 
 func gitRun(t *testing.T, args ...string) {
 	t.Helper()
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd := exec.CommandContext(context.Background(), "git", args...) //nolint:gosec // test with controlled args
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -442,25 +442,19 @@ func TestRunClaudeErrorAfterCommit(t *testing.T) {
 	}
 	r.BaseDir = env.BaseDir
 
-	// Run should still succeed since Claude committed.
-	if err := r.Run("add-feature"); err != nil {
-		t.Fatalf("Run should succeed when Claude committed before error: %v", err)
+	// Run should fail — improper Claude termination aborts the workflow.
+	err = r.Run("add-feature")
+	if err == nil {
+		t.Fatal("Run should fail when Claude returns an error")
+	}
+	if !strings.Contains(err.Error(), "terminated by signal") {
+		t.Errorf("error = %q, want 'terminated by signal'", err)
 	}
 
-	// Task should be in review state.
+	// Task should still be in pending state (not moved to review).
 	dd, _ := design.NewDir(env.DesignDir)
-	_, err = dd.FindTaskByState("add-feature", design.StateReview)
-	if err != nil {
-		t.Error("task should be in review after Claude committed before error")
-	}
-
-	// Branch should be pushed to remote.
-	remoteOut, err := exec.CommandContext(context.Background(), "git", "-C", env.BareDir, "branch").Output() //nolint:gosec // test
-	if err != nil {
-		t.Fatalf("git branch: %v", err)
-	}
-	if !strings.Contains(string(remoteOut), "hydra/add-feature") {
-		t.Error("branch not pushed to remote after Claude committed before error")
+	if _, findErr := dd.FindTaskByState("add-feature", design.StateReview); findErr == nil {
+		t.Error("task should NOT be in review when Claude terminated improperly")
 	}
 }
 
@@ -1158,7 +1152,7 @@ func TestMergeUsesRebase(t *testing.T) {
 	}
 
 	// Merge the task.
-	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
+	r.Claude = mockClaudeNoChanges
 	if err := r.Merge("add-feature"); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -1194,7 +1188,7 @@ func TestMergeFromReviewState(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
+	r.Claude = mockClaudeNoChanges
 	if err := r.Merge("add-feature"); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -2766,7 +2760,7 @@ func TestMergeGroupWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.BaseDir = env.BaseDir
-	r.Claude = mockClaude
+	r.Claude = mockClaudeNoChanges
 
 	// MergeGroup should merge both review tasks.
 	if err := r.MergeGroup("backend"); err != nil {
@@ -2949,7 +2943,7 @@ func TestMergeWorkflowBranchOnMain(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
+	r.Claude = mockClaudeNoChanges
 
 	if err := r.Merge("add-feature"); err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -3021,7 +3015,7 @@ func TestMergeMainRebasedAgainstOrigin(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	r.Claude = func(_ context.Context, _ ClaudeRunConfig) error { return nil }
+	r.Claude = mockClaudeNoChanges
 
 	if err := r.Merge("add-feature"); err != nil {
 		t.Fatalf("Merge: %v", err)

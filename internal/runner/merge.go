@@ -68,19 +68,29 @@ func (r *Runner) Merge(taskName string) error {
 	if !taskRepo.BranchExists(branch) {
 		return fmt.Errorf("task branch %q does not exist", branch)
 	}
-	if dirty, _ := taskRepo.HasChanges(); !dirty {
+	dirty, err := taskRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if !dirty {
 		if err := taskRepo.Checkout(branch); err != nil {
 			return fmt.Errorf("checking out branch: %w", err)
 		}
 	}
 
 	// Step 3: Abort any in-progress rebase from a previous failed attempt.
-	_ = taskRepo.RebaseAbort()
+	if err := taskRepo.RebaseAbort(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: rebase abort failed: %v\n", err)
+	}
 
 	// Step 4: Rebase task branch onto origin/main; collect conflict info if any.
 	// Skip rebase if the working tree is dirty — let Claude handle it.
 	var conflictFiles []string
-	if dirty, _ := taskRepo.HasChanges(); !dirty {
+	dirty, err = taskRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if !dirty {
 		conflictFiles, err = r.attemptRebase(taskRepo)
 		if err != nil {
 			return err
@@ -88,7 +98,10 @@ func (r *Runner) Merge(taskName string) error {
 	}
 
 	// Step 5: Assemble document and invoke Claude.
-	content, _ := task.Content()
+	content, err := task.Content()
+	if err != nil {
+		return fmt.Errorf("reading task content: %w", err)
+	}
 	cmds := r.commandsMap(wd)
 	sign := taskRepo.HasSigningKey()
 	doc, err := r.assembleMergeDocument(content, conflictFiles, cmds, sign, r.timeout(), r.Notify, r.notifyTitle(taskName))
@@ -105,13 +118,15 @@ func (r *Runner) Merge(taskName string) error {
 	if claudeFn == nil {
 		claudeFn = invokeClaude
 	}
-	_ = claudeFn(context.Background(), ClaudeRunConfig{
+	if err := claudeFn(context.Background(), ClaudeRunConfig{
 		RepoDir:    taskRepo.Dir,
 		Document:   doc,
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
-	})
+	}); err != nil {
+		return fmt.Errorf("claude failed: %w", err)
+	}
 
 	// Step 6: Force-push the branch (Claude may have added commits).
 	if err := taskRepo.ForcePushWithLease(branch); err != nil {
@@ -163,8 +178,13 @@ func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
 	}
 
 	// Rebase failed — collect conflict files and abort.
-	conflictFiles, _ := taskRepo.ConflictFiles()
-	_ = taskRepo.RebaseAbort()
+	conflictFiles, cfErr := taskRepo.ConflictFiles()
+	if cfErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not list conflict files: %v\n", cfErr)
+	}
+	if err := taskRepo.RebaseAbort(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: rebase abort failed: %v\n", err)
+	}
 	return conflictFiles, nil
 }
 

@@ -35,7 +35,9 @@ func PrepareMeta(repoDir, name string, input json.RawMessage) ToolMeta {
 	meta := ToolMeta{Kind: ToolKindFor(name)}
 
 	var params map[string]string
-	_ = json.Unmarshal(input, &params)
+	if err := json.Unmarshal(input, &params); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not parse tool input for %s: %v\n", name, err)
+	}
 
 	switch name {
 	case toolReadFile:
@@ -180,7 +182,10 @@ func execListFiles(repoDir string, params map[string]string) (string, error) {
 	for _, e := range entries {
 		name := e.Name()
 		if pattern != "" {
-			matched, _ := filepath.Match(pattern, name)
+			matched, err := filepath.Match(pattern, name)
+			if err != nil {
+				return "", fmt.Errorf("invalid pattern %q: %w", pattern, err)
+			}
 			if !matched {
 				continue
 			}
@@ -219,7 +224,10 @@ func execSearchFiles(repoDir string, params map[string]string) (string, error) {
 			return nil
 		}
 		if globPattern != "" {
-			matched, _ := filepath.Match(globPattern, filepath.Base(path))
+			matched, mErr := filepath.Match(globPattern, filepath.Base(path))
+			if mErr != nil {
+				return fmt.Errorf("invalid glob %q: %w", globPattern, mErr)
+			}
 			if !matched {
 				return nil
 			}
@@ -230,7 +238,10 @@ func execSearchFiles(repoDir string, params map[string]string) (string, error) {
 			return nil //nolint:nilerr // skip unreadable files
 		}
 
-		relPath, _ := filepath.Rel(repoDir, path)
+		relPath, relErr := filepath.Rel(repoDir, path)
+		if relErr != nil {
+			relPath = path // fall back to absolute path
+		}
 		lines := strings.Split(string(data), "\n")
 		for i, line := range lines {
 			if re.MatchString(line) {

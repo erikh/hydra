@@ -237,29 +237,37 @@ func promptCompletionInstall() {
 	}
 
 	if rcContainsCompletion(rcPath) {
-		_ = writeCompletionStub(true)
+		warnCompletionStub(true)
 		return
 	}
 
 	fmt.Fprintf(os.Stderr, "Would you like to enable tab completion for hydra in %s? [y/N] ", rcPath)
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
-		_ = writeCompletionStub(false)
+		warnCompletionStub(false)
 		return
 	}
 
 	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-	if answer == "y" || answer == "yes" {
-		if err := injectCompletion(rcPath, shell); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not inject completion: %v\n", err)
-			_ = writeCompletionStub(false)
-			return
-		}
-		_ = writeCompletionStub(true)
-		fmt.Fprintf(os.Stderr, "Completion installed in %s.\n", rcPath)
-	} else {
-		_ = writeCompletionStub(false)
+	if answer != "y" && answer != "yes" {
+		warnCompletionStub(false)
 		fmt.Fprintf(os.Stderr, "Skipped. You can install later with: hydra completion install\n")
+		return
+	}
+
+	if err := injectCompletion(rcPath, shell); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not inject completion: %v\n", err)
+		warnCompletionStub(false)
+		return
+	}
+	warnCompletionStub(true)
+	fmt.Fprintf(os.Stderr, "Completion installed in %s.\n", rcPath)
+}
+
+// warnCompletionStub writes the completion stub and warns on error.
+func warnCompletionStub(installed bool) {
+	if err := writeCompletionStub(installed); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not write completion stub: %v\n", err)
 	}
 }
 
@@ -303,13 +311,13 @@ func completionCommand() *cli.Command {
 					}
 					if rcContainsCompletion(rcPath) {
 						fmt.Fprintf(os.Stderr, "Completion already installed in %s\n", rcPath)
-						_ = writeCompletionStub(true)
+						warnCompletionStub(true)
 						return nil
 					}
 					if err := injectCompletion(rcPath, shell); err != nil {
 						return fmt.Errorf("injecting completion: %w", err)
 					}
-					_ = writeCompletionStub(true)
+					warnCompletionStub(true)
 					fmt.Fprintf(os.Stderr, "Completion installed in %s.\n", rcPath)
 					return nil
 				},
@@ -336,7 +344,9 @@ func completionCommand() *cli.Command {
 					// Remove the stub so the user gets prompted again if they want.
 					p := completionStubPath()
 					if p != "" {
-						_ = os.Remove(p)
+						if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+							fmt.Fprintf(os.Stderr, "Warning: could not remove completion stub: %v\n", err)
+						}
 					}
 					fmt.Fprintf(os.Stderr, "Completion removed from %s.\n", rcPath)
 					return nil

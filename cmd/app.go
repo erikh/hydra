@@ -1410,11 +1410,17 @@ func milestoneCreateCommand() *cli.Command {
 			}
 			tmpPath := tmpFile.Name()
 			if _, err := tmpFile.WriteString(design.MilestoneTemplate); err != nil {
-				_ = tmpFile.Close()
-				_ = os.Remove(tmpPath)
+				if cErr := tmpFile.Close(); cErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not close temp file: %v\n", cErr)
+				}
+				if rErr := os.Remove(tmpPath); rErr != nil { //nolint:gosec // path is from our own temp file
+					fmt.Fprintf(os.Stderr, "Warning: could not remove temp file: %v\n", rErr)
+				}
 				return fmt.Errorf("writing template: %w", err)
 			}
-			_ = tmpFile.Close()
+			if err := tmpFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not close temp file: %v\n", err)
+			}
 			defer func() { _ = os.Remove(tmpPath) }()
 
 			if err := design.RunEditorOnFile(editor, tmpPath, os.Stdin, os.Stdout, os.Stderr); err != nil {

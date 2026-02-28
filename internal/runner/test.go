@@ -91,7 +91,10 @@ func (r *Runner) Test(taskName string) error {
 	}
 
 	// Capture HEAD before invoking Claude.
-	beforeSHA, _ := taskRepo.LastCommitSHA()
+	beforeSHA, err := taskRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA: %w", err)
+	}
 
 	// Invoke Claude with test document.
 	claudeFn := r.Claude
@@ -105,16 +108,17 @@ func (r *Runner) Test(taskName string) error {
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
 	}
-	claudeErr := claudeFn(context.Background(), runCfg)
+	if err := claudeFn(context.Background(), runCfg); err != nil {
+		return err
+	}
 
-	// Check if Claude committed (HEAD moved), even if Claude returned an error
-	// (e.g. terminated by signal after committing).
-	afterSHA, _ := taskRepo.LastCommitSHA()
+	// Check if Claude committed (HEAD moved).
+	afterSHA, err := taskRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA after claude: %w", err)
+	}
 
 	if afterSHA == beforeSHA {
-		if claudeErr != nil {
-			return claudeErr
-		}
 		fmt.Printf("Test session for %q: no changes made.\n", taskName)
 		return nil
 	}

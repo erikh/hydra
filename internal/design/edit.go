@@ -13,7 +13,7 @@ import (
 
 // runEditor opens the given file in the specified editor, attaching stdin/stdout/stderr.
 func runEditor(editor, filePath string, stdin io.Reader, stdout, stderr io.Writer) error {
-	cmd := exec.CommandContext(context.Background(), editor, filePath)
+	cmd := exec.CommandContext(context.Background(), editor, filePath) //nolint:gosec // editor is user-configured
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -60,7 +60,9 @@ func createNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, 
 		return fmt.Errorf("creating temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	_ = tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not close temp file: %v\n", err)
+	}
 	defer func() { _ = os.Remove(tmpPath) }()
 
 	if err := runEditor(editor, tmpPath, stdin, stdout, stderr); err != nil {
@@ -80,9 +82,9 @@ func createNewTask(designDir, taskName, editor string, stdin io.Reader, stdout, 
 		return fmt.Errorf("creating tasks directory: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, destPath); err != nil {
+	if err := os.Rename(tmpPath, destPath); err != nil { //nolint:gosec // paths are constructed from our own design dir
 		// Rename can fail across filesystems; fall back to copy.
-		if err := os.WriteFile(destPath, content, 0o600); err != nil {
+		if err := os.WriteFile(destPath, content, 0o600); err != nil { //nolint:gosec // paths are constructed from our own design dir
 			return fmt.Errorf("writing task file: %w", err)
 		}
 	}

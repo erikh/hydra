@@ -27,7 +27,11 @@ func (r *Runner) ReviewDev(ctx context.Context, taskName string) error {
 	}
 
 	branch := task.BranchName()
-	if dirty, _ := taskRepo.HasChanges(); !dirty {
+	dirty, err := taskRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if !dirty {
 		if taskRepo.BranchExists(branch) {
 			if err := taskRepo.Checkout(branch); err != nil {
 				return fmt.Errorf("checking out branch: %w", err)
@@ -83,7 +87,11 @@ func (r *Runner) Review(taskName string) error {
 	}
 
 	// Rebase onto latest remote main if requested (only if clean tree).
-	if dirty, _ := taskRepo.HasChanges(); r.Rebase && !dirty {
+	dirty, err := taskRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if r.Rebase && !dirty {
 		conflictFiles, err := r.attemptRebase(taskRepo)
 		if err != nil {
 			return fmt.Errorf("rebasing onto main: %w", err)
@@ -121,7 +129,10 @@ func (r *Runner) Review(taskName string) error {
 	}
 
 	// Capture HEAD before invoking Claude.
-	beforeSHA, _ := taskRepo.LastCommitSHA()
+	beforeSHA, err := taskRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA: %w", err)
+	}
 
 	// Invoke Claude with review document.
 	claudeFn := r.Claude
@@ -135,16 +146,17 @@ func (r *Runner) Review(taskName string) error {
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
 	}
-	claudeErr := claudeFn(context.Background(), runCfg)
+	if err := claudeFn(context.Background(), runCfg); err != nil {
+		return err
+	}
 
-	// Check if Claude committed (HEAD moved), even if Claude returned an error
-	// (e.g. terminated by signal after committing).
-	afterSHA, _ := taskRepo.LastCommitSHA()
+	// Check if Claude committed (HEAD moved).
+	afterSHA, err := taskRepo.LastCommitSHA()
+	if err != nil {
+		return fmt.Errorf("getting HEAD SHA after claude: %w", err)
+	}
 
 	if afterSHA == beforeSHA {
-		if claudeErr != nil {
-			return claudeErr
-		}
 		fmt.Printf("Review of %q: no changes made.\n", taskName)
 		return nil
 	}
@@ -262,7 +274,11 @@ func (r *Runner) ReviewDiff(taskName string) error {
 	if !taskRepo.BranchExists(branch) {
 		return fmt.Errorf("branch %q does not exist", branch)
 	}
-	if dirty, _ := taskRepo.HasChanges(); !dirty {
+	dirty, err := taskRepo.HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree: %w", err)
+	}
+	if !dirty {
 		if err := taskRepo.Checkout(branch); err != nil {
 			return fmt.Errorf("checking out branch: %w", err)
 		}
