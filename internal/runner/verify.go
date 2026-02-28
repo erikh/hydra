@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/erikh/hydra/internal/repo"
 )
 
 // Verify uses Claude to verify that all items in functional.md are satisfied
@@ -54,11 +56,15 @@ func (r *Runner) Verify() error {
 	}
 
 	// Assemble document.
+	sign := verifyRepo.HasSigningKey()
 	cmds := r.commandsMap(wd)
-	doc, err := r.assembleVerifyDocument(functional, cmds)
+	doc, err := r.assembleVerifyDocument(functional, sign, cmds)
 	if err != nil {
 		return fmt.Errorf("assembling verify document: %w", err)
 	}
+
+	// Capture HEAD before invoking Claude.
+	beforeSHA, _ := verifyRepo.LastCommitSHA()
 
 	// Invoke Claude.
 	claudeFn := r.Claude
@@ -82,6 +88,11 @@ func (r *Runner) Verify() error {
 
 	if _, err := os.Stat(passedPath); err == nil {
 		fmt.Println("All functional requirements verified.")
+
+		if err := r.pushVerifyFixes(verifyRepo, beforeSHA); err != nil {
+			return err
+		}
+
 		if syncErr := r.Sync(nil); syncErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: post-verify sync failed: %v\n", syncErr)
 		}
@@ -102,7 +113,7 @@ func (r *Runner) Verify() error {
 }
 
 // assembleVerifyDocument builds the prompt for the verify workflow.
-func (r *Runner) assembleVerifyDocument(functional string, cmds map[string]string) (string, error) {
+func (r *Runner) assembleVerifyDocument(functional string, sign bool, cmds map[string]string) (string, error) {
 	rules, err := r.Design.Rules()
 	if err != nil {
 		return "", err
@@ -153,9 +164,35 @@ func (r *Runner) assembleVerifyDocument(functional string, cmds map[string]strin
 	b.WriteString("Do not modify the functional specification. " +
 		"The specification is the source of truth — if code does not match the specification, fix the code.\n")
 
+	b.WriteString(commitInstructions(sign, cmds))
+
 	b.WriteString("\n# Reminder\n\n")
 	b.WriteString("The functional specification is authoritative. Fix code to match it, never the reverse. " +
-		"Create verify-passed.txt or verify-failed.txt when done.\n")
+		"Commit your changes, then create verify-passed.txt or verify-failed.txt when done.\n")
 
 	return b.String(), nil
+}
+
+// pushVerifyFixes rebases and pushes if Claude committed changes during verify.
+func (r *Runner) pushVerifyFixes(verifyRepo *repo.Repo, beforeSHA string) error {
+	afterSHA, _ := verifyRepo.LastCommitSHA()
+	if afterSHA == beforeSHA {
+		return nil
+	}
+
+	if err := verifyRepo.Fetch(); err != nil {
+		return fmt.Errorf("fetching origin before push: %w", err)
+	}
+	defaultBranch, err := r.detectDefaultBranch(verifyRepo)
+	if err != nil {
+		return fmt.Errorf("detecting default branch: %w", err)
+	}
+	if err := verifyRepo.Rebase("origin/" + defaultBranch); err != nil {
+		return fmt.Errorf("rebasing against origin/%s before push: %w", defaultBranch, err)
+	}
+	if err := verifyRepo.PushMain(); err != nil {
+		return fmt.Errorf("pushing: %w", err)
+	}
+	fmt.Println("Pushed verify fixes to origin.")
+	return nil
 }

@@ -142,6 +142,11 @@ func TestVerifyDocumentContents(t *testing.T) {
 		t.Error("verify document missing lint content")
 	}
 
+	// Verify document includes commit instructions.
+	if !strings.Contains(captured, "# Commit Instructions") {
+		t.Error("document missing Commit Instructions section")
+	}
+
 	// Verify rules and lint appear before functional specification.
 	rulesIdx := strings.Index(captured, "# Rules")
 	lintIdx := strings.Index(captured, "# Lint Rules")

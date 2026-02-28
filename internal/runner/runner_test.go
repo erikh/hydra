@@ -2645,7 +2645,7 @@ func TestVerifyDocumentIncludesTestCoverage(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result, err := r.assembleVerifyDocument("Feature X must do Y.", cmds)
+	result, err := r.assembleVerifyDocument("Feature X must do Y.", false, cmds)
 	if err != nil {
 		t.Fatalf("assembleVerifyDocument: %v", err)
 	}
@@ -2663,7 +2663,7 @@ func TestVerifyDocumentSpecIsAuthoritative(t *testing.T) {
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result, err := r.assembleVerifyDocument("Feature X must do Y.", cmds)
+	result, err := r.assembleVerifyDocument("Feature X must do Y.", false, cmds)
 	if err != nil {
 		t.Fatalf("assembleVerifyDocument: %v", err)
 	}
