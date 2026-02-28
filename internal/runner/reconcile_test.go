@@ -52,7 +52,7 @@ func TestReconcileFullWorkflow(t *testing.T) {
 	}
 
 	// Verify functional.md was updated in the design dir.
-	content, err := os.ReadFile(filepath.Join(env.DesignDir, "functional.md")) //nolint:gosec // test
+	content, err := os.ReadFile(filepath.Join(env.DesignDir, "functional.md"))
 	if err != nil {
 		t.Fatalf("reading functional.md: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestReconcileClaudeFailure(t *testing.T) {
 	writeFile(t, filepath.Join(env.DesignDir, "state", "completed", "done-task.md"), "Done task content")
 
 	// Save original functional.md content.
-	origFunctional, _ := os.ReadFile(filepath.Join(env.DesignDir, "functional.md")) //nolint:gosec // test
+	origFunctional, _ := os.ReadFile(filepath.Join(env.DesignDir, "functional.md"))
 
 	r, err := New(env.Config)
 	if err != nil {
@@ -199,7 +199,7 @@ func TestReconcileClaudeFailure(t *testing.T) {
 	}
 
 	// functional.md should NOT be updated.
-	currentFunctional, _ := os.ReadFile(filepath.Join(env.DesignDir, "functional.md")) //nolint:gosec // test
+	currentFunctional, _ := os.ReadFile(filepath.Join(env.DesignDir, "functional.md"))
 	if string(currentFunctional) != string(origFunctional) {
 		t.Error("functional.md should not be modified on Claude failure")
 	}

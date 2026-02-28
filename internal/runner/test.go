@@ -70,7 +70,10 @@ func (r *Runner) Test(taskName string) error {
 	}
 
 	cmds := r.commandsMap(wd)
-	doc := assembleTestDocument(content)
+	doc, err := r.assembleTestDocument(content)
+	if err != nil {
+		return fmt.Errorf("assembling test document: %w", err)
+	}
 
 	// Append verification and commit instructions so Claude handles test/lint/staging/committing.
 	sign := taskRepo.HasSigningKey()
@@ -134,12 +137,33 @@ func (r *Runner) Test(taskName string) error {
 }
 
 // assembleTestDocument builds a document for the test session.
-func assembleTestDocument(taskContent string) string {
+func (r *Runner) assembleTestDocument(taskContent string) (string, error) {
+	rules, err := r.Design.Rules()
+	if err != nil {
+		return "", err
+	}
+
+	lint, err := r.Design.Lint()
+	if err != nil {
+		return "", err
+	}
+
 	var b strings.Builder
 
 	b.WriteString("# Mission\n\nYour sole objective is to add tests for the task described below. ")
 	b.WriteString("Focus exclusively on identifying untested features from the task document and adding coverage. ")
 	b.WriteString("Do not refactor existing code, add unrelated tests, or make changes outside the scope of this task.\n\n")
+
+	if rules != "" {
+		b.WriteString("# Rules\n\n")
+		b.WriteString(rules)
+		b.WriteString("\n\n")
+	}
+	if lint != "" {
+		b.WriteString("# Lint Rules\n\n")
+		b.WriteString(lint)
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString("# Task Description\n\n")
 	b.WriteString(taskContent)
@@ -155,5 +179,5 @@ func assembleTestDocument(taskContent string) string {
 	b.WriteString("3. Add tests for any features or behaviors that lack coverage\n")
 	b.WriteString("4. Ensure tests cover both success and error paths\n\n")
 
-	return b.String()
+	return b.String(), nil
 }

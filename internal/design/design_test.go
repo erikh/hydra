@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+const testGroupBackend = "backend"
+
 func setupDesignDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -412,7 +414,7 @@ func TestFindTask(t *testing.T) {
 	if task.Name != "add-api" {
 		t.Errorf("Name = %q", task.Name)
 	}
-	if task.Group != "backend" {
+	if task.Group != testGroupBackend {
 		t.Errorf("Group = %q", task.Group)
 	}
 }
@@ -536,7 +538,7 @@ func TestMoveTaskGroupPreserved(t *testing.T) {
 
 	var found bool
 	for _, rt := range review {
-		if rt.Name == "add-api" && rt.Group == "backend" {
+		if rt.Name == "add-api" && rt.Group == testGroupBackend {
 			found = true
 			break
 		}
@@ -550,7 +552,7 @@ func TestMoveTaskGroupPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindTaskByState: %v", err)
 	}
-	if ft.Group != "backend" {
+	if ft.Group != testGroupBackend {
 		t.Errorf("Group = %q, want backend", ft.Group)
 	}
 }

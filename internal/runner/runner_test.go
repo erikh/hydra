@@ -115,6 +115,24 @@ func mkdirAll(t *testing.T, path string) {
 	}
 }
 
+const testGroupBackend = "backend"
+
+// stubRunner creates a minimal *Runner whose Design dir contains rules.md and lint.md.
+// Useful for unit-testing assemble*Document methods without a full test environment.
+func stubRunner(t *testing.T) *Runner {
+	t.Helper()
+	designDir := filepath.Join(t.TempDir(), "design")
+	mkdirAll(t, designDir)
+	writeFile(t, filepath.Join(designDir, "rules.md"), "Follow best practices.")
+	writeFile(t, filepath.Join(designDir, "lint.md"), "Use gofmt.")
+	mkdirAll(t, filepath.Join(designDir, "tasks"))
+	dd, err := design.NewDir(designDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Runner{Design: dd}
+}
+
 // mockCommit stages and commits all changes in the given repo dir.
 func mockCommit(dir string) error {
 	add := exec.CommandContext(context.Background(), "git", "add", "-A")
@@ -474,7 +492,11 @@ func TestRunLockContention(t *testing.T) {
 	if err := lk.Acquire(); err != nil {
 		t.Fatalf("manual lock Acquire: %v", err)
 	}
-	defer func() { _ = lk.Release() }()
+	defer func() {
+		if err := lk.Release(); err != nil {
+			t.Errorf("lk.Release: %v", err)
+		}
+	}()
 
 	r, err := New(env.Config)
 	if err != nil {
@@ -501,7 +523,11 @@ func TestRunLockNoCrossTalkContention(t *testing.T) {
 	if err := lk.Acquire(); err != nil {
 		t.Fatalf("manual lock Acquire: %v", err)
 	}
-	defer func() { _ = lk.Release() }()
+	defer func() {
+		if err := lk.Release(); err != nil {
+			t.Errorf("lk.Release: %v", err)
+		}
+	}()
 
 	r, err := New(env.Config)
 	if err != nil {
@@ -751,7 +777,7 @@ func TestRunGroupFullWorkflow(t *testing.T) {
 	// No backend tasks should remain pending.
 	pending, _ := dd.PendingTasks()
 	for _, p := range pending {
-		if p.Group == "backend" {
+		if p.Group == testGroupBackend {
 			t.Errorf("unexpected pending backend task: %s", p.Name)
 		}
 	}
@@ -799,7 +825,7 @@ func TestRunGroupStopsOnError(t *testing.T) {
 	pending, _ := dd.PendingTasks()
 	foundDB := false
 	for _, p := range pending {
-		if p.Group == "backend" && p.Name == "add-db" {
+		if p.Group == testGroupBackend && p.Name == "add-db" {
 			foundDB = true
 		}
 	}
@@ -1292,11 +1318,15 @@ func TestVerificationSectionExclusiveCommands(t *testing.T) {
 }
 
 func TestMergeDocumentExclusiveCommands(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	if !strings.Contains(result, "Do NOT run any individual test") {
 		t.Error("missing individual test prohibition in merge document")
@@ -1304,7 +1334,11 @@ func TestMergeDocumentExclusiveCommands(t *testing.T) {
 }
 
 func TestTestDocumentDoesNotContainTestLintCommands(t *testing.T) {
-	result := assembleTestDocument("Task content")
+	r := stubRunner(t)
+	result, err := r.assembleTestDocument("Task content")
+	if err != nil {
+		t.Fatalf("assembleTestDocument: %v", err)
+	}
 
 	if strings.Contains(result, "go test") {
 		t.Error("test document should not contain inline test commands")
@@ -1516,6 +1550,31 @@ func TestReviewDocumentIncludesValidation(t *testing.T) {
 	if !strings.Contains(captured, "# Commit Instructions") {
 		t.Error("review document missing commit instructions")
 	}
+
+	// Verify rules and lint are included.
+	if !strings.Contains(captured, "# Rules") {
+		t.Error("review document missing rules section")
+	}
+	if !strings.Contains(captured, "Follow best practices.") {
+		t.Error("review document missing rules content")
+	}
+	if !strings.Contains(captured, "# Lint Rules") {
+		t.Error("review document missing lint section")
+	}
+	if !strings.Contains(captured, "Use gofmt.") {
+		t.Error("review document missing lint content")
+	}
+
+	// Verify rules and lint appear before task content.
+	rulesIdx := strings.Index(captured, "# Rules")
+	lintIdx := strings.Index(captured, "# Lint Rules")
+	taskIdx := strings.Index(captured, "# Task")
+	if rulesIdx > taskIdx {
+		t.Error("rules section should appear before task content")
+	}
+	if lintIdx > taskIdx {
+		t.Error("lint section should appear before task content")
+	}
 }
 
 func TestReviewCommitsAndPushes(t *testing.T) {
@@ -1611,6 +1670,10 @@ func TestMergeDocumentContents(t *testing.T) {
 	// Verify the single document contains all expected sections.
 	for _, want := range []string{
 		"Merge Workflow",
+		"# Rules",
+		"Follow best practices.",
+		"# Lint Rules",
+		"Use gofmt.",
 		"Task Document",
 		"Commit Message Validation",
 		"Test Coverage",
@@ -1620,6 +1683,17 @@ func TestMergeDocumentContents(t *testing.T) {
 		if !strings.Contains(captured, want) {
 			t.Errorf("merge document missing %q", want)
 		}
+	}
+
+	// Verify rules and lint appear before task content.
+	rulesIdx := strings.Index(captured, "# Rules")
+	lintIdx := strings.Index(captured, "# Lint Rules")
+	taskIdx := strings.Index(captured, "## Task Document")
+	if rulesIdx > taskIdx {
+		t.Error("rules section should appear before task document")
+	}
+	if lintIdx > taskIdx {
+		t.Error("lint section should appear before task document")
 	}
 
 	// No conflicts expected, so no conflict section.
@@ -1786,6 +1860,31 @@ func TestTestDocumentContents(t *testing.T) {
 	}
 	if !strings.Contains(captured, "# Commit Instructions") {
 		t.Error("document missing commit instructions")
+	}
+
+	// Verify rules and lint are included.
+	if !strings.Contains(captured, "# Rules") {
+		t.Error("test document missing rules section")
+	}
+	if !strings.Contains(captured, "Follow best practices.") {
+		t.Error("test document missing rules content")
+	}
+	if !strings.Contains(captured, "# Lint Rules") {
+		t.Error("test document missing lint section")
+	}
+	if !strings.Contains(captured, "Use gofmt.") {
+		t.Error("test document missing lint content")
+	}
+
+	// Verify rules and lint appear before task content.
+	rulesIdx := strings.Index(captured, "# Rules")
+	lintIdx := strings.Index(captured, "# Lint Rules")
+	taskIdx := strings.Index(captured, "# Task Description")
+	if rulesIdx > taskIdx {
+		t.Error("rules section should appear before task description")
+	}
+	if lintIdx > taskIdx {
+		t.Error("lint section should appear before task description")
 	}
 }
 
@@ -2157,12 +2256,16 @@ func TestReviewDevContextCancellation(t *testing.T) {
 }
 
 func TestMergeDocumentWithConflicts(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
 	conflictFiles := []string{"main.go", "config.go"}
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	// Verify conflict section is present.
 	if !strings.Contains(result, "Conflict Resolution") {
@@ -2315,7 +2418,9 @@ func TestRunDocumentIncludesNotification(t *testing.T) {
 	var captured string
 	r.Claude = mockClaudeCapture(&captured)
 
-	_ = r.Run("add-feature")
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 
 	if !strings.Contains(captured, "Desktop Notifications") {
 		t.Error("run document missing notification section when Notify=true")
@@ -2335,7 +2440,9 @@ func TestRunDocumentExcludesNotificationWhenDisabled(t *testing.T) {
 	var captured string
 	r.Claude = mockClaudeCapture(&captured)
 
-	_ = r.Run("add-feature")
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 
 	if strings.Contains(captured, "Desktop Notifications") {
 		t.Error("run document should not contain notification section when Notify=false")
@@ -2358,7 +2465,9 @@ func TestRunDocumentIncludesTimeout(t *testing.T) {
 	var captured string
 	r.Claude = mockClaudeCapture(&captured)
 
-	_ = r.Run("add-feature")
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 
 	if !strings.Contains(captured, "Time Limit") {
 		t.Error("run document missing timeout section when timeout configured")
@@ -2379,13 +2488,20 @@ func TestTestDocumentIncludesNotification(t *testing.T) {
 	r.Notify = true
 
 	// Move task to review so Test can find it.
-	task, _ := r.Design.FindTask("add-feature")
-	_ = r.Design.MoveTask(task, design.StateReview)
+	task, err := r.Design.FindTask("add-feature")
+	if err != nil {
+		t.Fatalf("FindTask: %v", err)
+	}
+	if err := r.Design.MoveTask(task, design.StateReview); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
 
 	var captured string
 	r.Claude = mockClaudeCapture(&captured)
 
-	_ = r.Test("add-feature")
+	if err := r.Test("add-feature"); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
 
 	if !strings.Contains(captured, "Desktop Notifications") {
 		t.Error("test document missing notification section when Notify=true")
@@ -2403,13 +2519,20 @@ func TestReviewDocumentIncludesNotification(t *testing.T) {
 	r.Notify = true
 
 	// Move task to review.
-	task, _ := r.Design.FindTask("add-feature")
-	_ = r.Design.MoveTask(task, design.StateReview)
+	task, err := r.Design.FindTask("add-feature")
+	if err != nil {
+		t.Fatalf("FindTask: %v", err)
+	}
+	if err := r.Design.MoveTask(task, design.StateReview); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
 
 	var captured string
 	r.Claude = mockClaudeCapture(&captured)
 
-	_ = r.Review("add-feature")
+	if err := r.Review("add-feature"); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
 
 	if !strings.Contains(captured, "Desktop Notifications") {
 		t.Error("review document missing notification section when Notify=true")
@@ -2417,11 +2540,15 @@ func TestReviewDocumentIncludesNotification(t *testing.T) {
 }
 
 func TestMergeDocumentNoFetchInstruction(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 		"lint": "golangci-lint run",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	// Fetch is handled by the tool, not by Claude.
 	if strings.Contains(result, "Fetch Remote") {
@@ -2433,11 +2560,15 @@ func TestMergeDocumentNoFetchInstruction(t *testing.T) {
 }
 
 func TestMergeDocumentConflictResolutionReport(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
 	conflictFiles := []string{"main.go", "config.go"}
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	if !strings.Contains(result, "Conflict Resolution Report") {
 		t.Error("merge document missing Conflict Resolution Report section")
@@ -2448,11 +2579,15 @@ func TestMergeDocumentConflictResolutionReport(t *testing.T) {
 }
 
 func TestMergeDocumentConflictInstructions(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
 	conflictFiles := []string{"main.go"}
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	// Claude should be told to rebase and resolve, but not to loop (tool handles that).
 	if !strings.Contains(result, "git rebase origin/main") {
@@ -2468,26 +2603,37 @@ func TestMergeDocumentConflictInstructions(t *testing.T) {
 }
 
 func TestMergeDocumentIncludesNotification(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, true, "repo: task")
+	result, err := r.assembleMergeDocument("Task content", nil, cmds, false, 0, true, "repo: task")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	if !strings.Contains(result, "Desktop Notifications") {
 		t.Error("merge document missing notification section when notify=true")
 	}
 
-	result = assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	result, err = r.assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 	if strings.Contains(result, "Desktop Notifications") {
 		t.Error("merge document should not contain notification section when notify=false")
 	}
 }
 
 func TestMergeDocumentIncludesTimeout(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result := assembleMergeDocument("Task content", nil, cmds, false, 30*60*1e9, false, "")
+	result, err := r.assembleMergeDocument("Task content", nil, cmds, false, 30*60*1e9, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	if !strings.Contains(result, "Time Limit") {
 		t.Error("merge document missing timeout section")
@@ -2495,10 +2641,14 @@ func TestMergeDocumentIncludesTimeout(t *testing.T) {
 }
 
 func TestVerifyDocumentIncludesTestCoverage(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
-	result := assembleVerifyDocument("Feature X must do Y.", "/tmp/design/functional.md", cmds)
+	result, err := r.assembleVerifyDocument("Feature X must do Y.", "/tmp/design/functional.md", cmds)
+	if err != nil {
+		t.Fatalf("assembleVerifyDocument: %v", err)
+	}
 
 	if !strings.Contains(result, "adequate test coverage") {
 		t.Error("verify document missing test coverage instruction")
@@ -2509,11 +2659,15 @@ func TestVerifyDocumentIncludesTestCoverage(t *testing.T) {
 }
 
 func TestVerifyDocumentIncludesFunctionalPath(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
 	path := "/home/user/project/design/functional.md"
-	result := assembleVerifyDocument("Feature X must do Y.", path, cmds)
+	result, err := r.assembleVerifyDocument("Feature X must do Y.", path, cmds)
+	if err != nil {
+		t.Fatalf("assembleVerifyDocument: %v", err)
+	}
 
 	if !strings.Contains(result, path) {
 		t.Error("verify document missing absolute path to functional.md")
@@ -2536,8 +2690,13 @@ func TestTestRebaseConditional(t *testing.T) {
 	r.BaseDir = env.BaseDir
 
 	// Move task to review.
-	task, _ := r.Design.FindTask("add-feature")
-	_ = r.Design.MoveTask(task, design.StateReview)
+	task, err := r.Design.FindTask("add-feature")
+	if err != nil {
+		t.Fatalf("FindTask: %v", err)
+	}
+	if err := r.Design.MoveTask(task, design.StateReview); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
 
 	// Run without rebase — should succeed (no rebase attempted).
 	r.Rebase = false
@@ -2558,8 +2717,13 @@ func TestReviewRebaseConditional(t *testing.T) {
 	r.BaseDir = env.BaseDir
 
 	// Move task to review.
-	task, _ := r.Design.FindTask("add-feature")
-	_ = r.Design.MoveTask(task, design.StateReview)
+	task, err := r.Design.FindTask("add-feature")
+	if err != nil {
+		t.Fatalf("FindTask: %v", err)
+	}
+	if err := r.Design.MoveTask(task, design.StateReview); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
 
 	// Run without rebase — should succeed.
 	r.Rebase = false
@@ -2624,7 +2788,7 @@ func TestMergeGroupWorkflow(t *testing.T) {
 
 	var found int
 	for _, task := range tasks {
-		if task.Group == "backend" {
+		if task.Group == testGroupBackend {
 			found++
 		}
 	}
@@ -2698,11 +2862,15 @@ func TestDocumentsProhibitIndividualTestLint(t *testing.T) {
 }
 
 func TestMergeDocumentStayOnFeatureBranch(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
 
-	result := assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", nil, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	if !strings.Contains(result, "do NOT checkout main") {
 		t.Error("merge document missing instruction to not checkout main")
@@ -2719,12 +2887,16 @@ func TestMergeDocumentStayOnFeatureBranch(t *testing.T) {
 }
 
 func TestMergeDocumentStayOnFeatureBranchWithConflicts(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
 	conflictFiles := []string{"main.go"}
 
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	// Even with conflicts, Claude should stay on the feature branch.
 	if !strings.Contains(result, "do NOT checkout main") {
@@ -2741,12 +2913,16 @@ func TestMergeDocumentStayOnFeatureBranchWithConflicts(t *testing.T) {
 }
 
 func TestMergeDocumentNoRebaseLoop(t *testing.T) {
+	r := stubRunner(t)
 	cmds := map[string]string{
 		"test": "go test ./...",
 	}
 	conflictFiles := []string{"main.go"}
 
-	result := assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	result, err := r.assembleMergeDocument("Task content", conflictFiles, cmds, false, 0, false, "")
+	if err != nil {
+		t.Fatalf("assembleMergeDocument: %v", err)
+	}
 
 	// No rebase loop — tool handles the rebase-main-then-feature-branch flow.
 	if strings.Contains(result, "fetch and rebase again") {
@@ -2931,7 +3107,7 @@ func TestReviewListShowsGroupedTasks(t *testing.T) {
 
 	var found bool
 	for _, task := range tasks {
-		if task.Name == "add-api" && task.Group == "backend" {
+		if task.Name == "add-api" && task.Group == testGroupBackend {
 			found = true
 			break
 		}
@@ -2978,12 +3154,16 @@ func TestReviewListShowsMergeStateTasks(t *testing.T) {
 	os.Stdout = w
 
 	if err := r.ReviewList(); err != nil {
-		w.Close()
+		if cerr := w.Close(); cerr != nil {
+			t.Logf("w.Close: %v", cerr)
+		}
 		os.Stdout = old
 		t.Fatalf("ReviewList: %v", err)
 	}
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("w.Close: %v", err)
+	}
 	os.Stdout = old
 	out, _ := io.ReadAll(rd)
 
@@ -3018,12 +3198,16 @@ func TestMergeListShowsReviewStateTasks(t *testing.T) {
 	os.Stdout = w
 
 	if err := r.MergeList(); err != nil {
-		w.Close()
+		if cerr := w.Close(); cerr != nil {
+			t.Logf("w.Close: %v", cerr)
+		}
 		os.Stdout = old
 		t.Fatalf("MergeList: %v", err)
 	}
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("w.Close: %v", err)
+	}
 	os.Stdout = old
 	out, _ := io.ReadAll(rd)
 
@@ -3101,8 +3285,12 @@ func TestFixNoAutoConfirmDoesNotApply(t *testing.T) {
 	// Provide "n" to confirmation prompt via stdin.
 	oldStdin := os.Stdin
 	pr, pw, _ := os.Pipe()
-	_, _ = pw.WriteString("n\n")
-	pw.Close()
+	if _, err := pw.WriteString("n\n"); err != nil {
+		t.Fatalf("pw.WriteString: %v", err)
+	}
+	if err := pw.Close(); err != nil {
+		t.Fatalf("pw.Close: %v", err)
+	}
 	os.Stdin = pr
 	defer func() { os.Stdin = oldStdin }()
 
@@ -3147,12 +3335,16 @@ func TestReviewListSortsGroupsTogether(t *testing.T) {
 	os.Stdout = w
 
 	if err := r.ReviewList(); err != nil {
-		w.Close()
+		if cerr := w.Close(); cerr != nil {
+			t.Logf("w.Close: %v", cerr)
+		}
 		os.Stdout = old
 		t.Fatalf("ReviewList: %v", err)
 	}
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("w.Close: %v", err)
+	}
 	os.Stdout = old
 	out, _ := io.ReadAll(rd)
 
@@ -3188,12 +3380,16 @@ func TestGroupListSorted(t *testing.T) {
 	os.Stdout = w
 
 	if err := r.GroupList(); err != nil {
-		w.Close()
+		if cerr := w.Close(); cerr != nil {
+			t.Logf("w.Close: %v", cerr)
+		}
 		os.Stdout = old
 		t.Fatalf("GroupList: %v", err)
 	}
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("w.Close: %v", err)
+	}
 	os.Stdout = old
 	out, _ := io.ReadAll(rd)
 
@@ -3225,12 +3421,16 @@ func TestGroupTasksSorted(t *testing.T) {
 	os.Stdout = w
 
 	if err := r.GroupTasks("backend"); err != nil {
-		w.Close()
+		if cerr := w.Close(); cerr != nil {
+			t.Logf("w.Close: %v", cerr)
+		}
 		os.Stdout = old
 		t.Fatalf("GroupTasks: %v", err)
 	}
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("w.Close: %v", err)
+	}
 	os.Stdout = old
 	out, _ := io.ReadAll(rd)
 

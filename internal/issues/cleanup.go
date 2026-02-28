@@ -54,31 +54,32 @@ func Cleanup(dd *design.Dir, sourceRepo *repo.Repo, closer Closer) (*CleanupResu
 			}
 
 			// Close associated issue if this is an issue task.
-			if closer != nil && IsIssueTask(&task) {
-				num := ParseIssueTaskNumber(task.Name)
-				if num == 0 {
-					continue
-				}
+			if closer == nil || !IsIssueTask(&task) {
+				continue
+			}
+			num := ParseIssueTaskNumber(task.Name)
+			if num == 0 {
+				continue
+			}
 
-				taskRef := task.Name
-				if task.Group != "" {
-					taskRef = task.Group + "/" + task.Name
-				}
-				sha := mergeSHAs[taskRef]
+			taskRef := task.Name
+			if task.Group != "" {
+				taskRef = task.Group + "/" + task.Name
+			}
+			sha := mergeSHAs[taskRef]
 
-				comment := fmt.Sprintf(
-					"Thanks for reporting this! It has been addressed by hydra in commit %s.",
-					sha,
-				)
-				if sha == "" {
-					comment = "Thanks for reporting this! It has been addressed by hydra."
-				}
+			comment := fmt.Sprintf(
+				"Thanks for reporting this! It has been addressed by hydra in commit %s.",
+				sha,
+			)
+			if sha == "" {
+				comment = "Thanks for reporting this! It has been addressed by hydra."
+			}
 
-				if err := closer.CloseIssue(num, comment); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not close issue #%d: %v\n", num, err)
-				} else {
-					result.IssuesClosed++
-				}
+			if err := closer.CloseIssue(num, comment); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not close issue #%d: %v\n", num, err)
+			} else {
+				result.IssuesClosed++
 			}
 		}
 	}

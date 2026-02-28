@@ -91,7 +91,10 @@ func (r *Runner) Merge(taskName string) error {
 	content, _ := task.Content()
 	cmds := r.commandsMap(wd)
 	sign := taskRepo.HasSigningKey()
-	doc := assembleMergeDocument(content, conflictFiles, cmds, sign, r.timeout(), r.Notify, r.notifyTitle(taskName))
+	doc, err := r.assembleMergeDocument(content, conflictFiles, cmds, sign, r.timeout(), r.Notify, r.notifyTitle(taskName))
+	if err != nil {
+		return fmt.Errorf("assembling merge document: %w", err)
+	}
 
 	// Run before hook.
 	if err := r.runBeforeHook(wd); err != nil {
@@ -172,7 +175,17 @@ func (r *Runner) attemptRebase(taskRepo *repo.Repo) ([]string, error) {
 // The calling tool handles all git orchestration (fetch, rebase, checkout, push).
 // Claude's job is limited to: resolving conflicts (if any), validating commits,
 // verifying test coverage, and running tests.
-func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool, timeout time.Duration, notify bool, notifyTitle string) string {
+func (r *Runner) assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[string]string, sign bool, timeout time.Duration, notify bool, notifyTitle string) (string, error) {
+	rules, err := r.Design.Rules()
+	if err != nil {
+		return "", err
+	}
+
+	lint, err := r.Design.Lint()
+	if err != nil {
+		return "", err
+	}
+
 	var b strings.Builder
 
 	b.WriteString("# Merge Workflow\n\n")
@@ -181,6 +194,17 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 		"Do NOT push. The tool handles all branch switching and pushing after you finish.\n\n")
 	b.WriteString("Complete all steps below in order. " +
 		"Do not make changes beyond what is required for the merge — resolve conflicts, validate commits and tests, and commit. Nothing else.\n\n")
+
+	if rules != "" {
+		b.WriteString("# Rules\n\n")
+		b.WriteString(rules)
+		b.WriteString("\n\n")
+	}
+	if lint != "" {
+		b.WriteString("# Lint Rules\n\n")
+		b.WriteString(lint)
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString("## Task Document\n\n")
 	b.WriteString(taskContent)
@@ -230,7 +254,7 @@ func assembleMergeDocument(taskContent string, conflictFiles []string, cmds map[
 	}
 	b.WriteString(missionReminder())
 
-	return b.String()
+	return b.String(), nil
 }
 
 // rebaseAndPush checks out the default branch, rebases it against origin/main

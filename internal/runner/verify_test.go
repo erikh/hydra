@@ -127,6 +127,31 @@ func TestVerifyDocumentContents(t *testing.T) {
 	if !strings.Contains(captured, "Functional Specification Updates") {
 		t.Error("document missing Functional Specification Updates section")
 	}
+
+	// Verify rules and lint are included.
+	if !strings.Contains(captured, "# Rules") {
+		t.Error("verify document missing rules section")
+	}
+	if !strings.Contains(captured, "Follow best practices.") {
+		t.Error("verify document missing rules content")
+	}
+	if !strings.Contains(captured, "# Lint Rules") {
+		t.Error("verify document missing lint section")
+	}
+	if !strings.Contains(captured, "Use gofmt.") {
+		t.Error("verify document missing lint content")
+	}
+
+	// Verify rules and lint appear before functional specification.
+	rulesIdx := strings.Index(captured, "# Rules")
+	lintIdx := strings.Index(captured, "# Lint Rules")
+	funcIdx := strings.Index(captured, "# Functional Specification")
+	if rulesIdx > funcIdx {
+		t.Error("rules section should appear before functional specification")
+	}
+	if lintIdx > funcIdx {
+		t.Error("lint section should appear before functional specification")
+	}
 }
 
 func TestVerifyClaudeFailure(t *testing.T) {

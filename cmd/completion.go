@@ -106,18 +106,23 @@ func writeCompletionStub(installed bool) error {
 	if installed {
 		content = "installed\n"
 	}
-	return os.WriteFile(p, []byte(content), 0o644)
+	return os.WriteFile(p, []byte(content), 0o600)
 }
+
+const (
+	shellBash = "bash"
+	shellZsh  = "zsh"
+)
 
 // detectShellType returns "bash" or "zsh" based on $SHELL, or empty if unsupported.
 func detectShellType() string {
 	shell := os.Getenv("SHELL")
 	base := filepath.Base(shell)
 	switch base {
-	case "bash":
-		return "bash"
-	case "zsh":
-		return "zsh"
+	case shellBash:
+		return shellBash
+	case shellZsh:
+		return shellZsh
 	default:
 		return ""
 	}
@@ -130,9 +135,9 @@ func shellRCPath() string {
 		return ""
 	}
 	switch detectShellType() {
-	case "bash":
+	case shellBash:
 		return filepath.Join(home, ".bashrc")
-	case "zsh":
+	case shellZsh:
 		return filepath.Join(home, ".zshrc")
 	default:
 		return ""
@@ -141,7 +146,7 @@ func shellRCPath() string {
 
 // rcContainsCompletion checks if the RC file already has the hydra completion block.
 func rcContainsCompletion(rcPath string) bool {
-	data, err := os.ReadFile(rcPath)
+	data, err := os.ReadFile(filepath.Clean(rcPath))
 	if err != nil {
 		return false
 	}
@@ -156,7 +161,7 @@ func injectCompletion(rcPath, shell string) error {
 		return nil
 	}
 
-	if shell != "bash" && shell != "zsh" {
+	if shell != shellBash && shell != shellZsh {
 		return fmt.Errorf("unsupported shell: %s", shell)
 	}
 
@@ -166,11 +171,11 @@ func injectCompletion(rcPath, shell string) error {
 		completionEndMarker,
 	)
 
-	f, err := os.OpenFile(rcPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(filepath.Clean(rcPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, err = f.WriteString(block)
 	return err
@@ -178,7 +183,7 @@ func injectCompletion(rcPath, shell string) error {
 
 // removeCompletion removes the hydra completion block from the RC file.
 func removeCompletion(rcPath string) error {
-	data, err := os.ReadFile(rcPath)
+	data, err := os.ReadFile(filepath.Clean(rcPath))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -208,7 +213,7 @@ func removeCompletion(rcPath string) error {
 	}
 
 	newContent := content[:start] + content[end:]
-	return os.WriteFile(rcPath, []byte(newContent), 0o644)
+	return os.WriteFile(filepath.Clean(rcPath), []byte(newContent), 0o600)
 }
 
 // promptCompletionInstall asks the user if they want completion injected.

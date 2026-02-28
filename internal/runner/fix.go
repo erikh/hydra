@@ -26,7 +26,7 @@ type fixAction struct {
 // Returns an error only if scanning itself fails, not for individual issues.
 func (r *Runner) Fix(autoConfirm bool) error {
 	baseDir := r.BaseDir
-	if baseDir == ""  {
+	if baseDir == "" {
 		baseDir = "."
 	}
 
@@ -121,7 +121,7 @@ func (r *Runner) Fix(autoConfirm bool) error {
 // fixDuplicateTaskNames checks for the same task name appearing in multiple states.
 // When duplicates are found, prompts the user to choose which copy to keep.
 // Returns the number of conflicts found.
-func (r *Runner) fixDuplicateTaskNames() (int, error) {
+func (r *Runner) fixDuplicateTaskNames() (int, error) { //nolint:unparam // error kept for future use
 	seen := make(map[string][]design.Task)
 
 	for _, state := range []design.TaskState{
@@ -212,7 +212,7 @@ func (r *Runner) scanStaleLocks(baseDir string) ([]fixAction, error) {
 		if !isLive {
 			p := path // capture for closure
 			actions = append(actions, fixAction{
-				description: fmt.Sprintf("remove stale lock %s", base),
+				description: "remove stale lock " + base,
 				fix:         func() error { return os.Remove(p) },
 			})
 		}
@@ -223,19 +223,19 @@ func (r *Runner) scanStaleLocks(baseDir string) ([]fixAction, error) {
 
 // sanitizeLockName matches the lock package's slash-to-dash conversion.
 func sanitizeLockName(name string) string {
-	out := ""
+	var b strings.Builder
 	for _, c := range name {
 		if c == '/' {
-			out += "--"
+			b.WriteString("--")
 		} else {
-			out += string(c)
+			b.WriteRune(c)
 		}
 	}
-	return out
+	return b.String()
 }
 
 // scanWorkDirBranches checks that work directories are on the correct branch.
-func (r *Runner) scanWorkDirBranches(baseDir string) ([]fixAction, error) {
+func (r *Runner) scanWorkDirBranches(_ string) ([]fixAction, error) {
 	tasks, err := r.Design.AllTasks()
 	if err != nil {
 		return nil, err
@@ -344,7 +344,7 @@ func (r *Runner) scanMissingStateDirs() []fixAction {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			d := dir // capture
 			actions = append(actions, fixAction{
-				description: fmt.Sprintf("create missing directory %s", d),
+				description: "create missing directory " + d,
 				fix:         func() error { return os.MkdirAll(d, 0o750) },
 			})
 		}
@@ -417,7 +417,7 @@ func (r *Runner) collectOrphanedWorkDirs(dir string, leafDirs, parentDirs map[st
 		// Not expected — schedule teardown and removal.
 		p := entryPath // capture
 		actions = append(actions, fixAction{
-			description: fmt.Sprintf("remove orphaned work directory %s", p),
+			description: "remove orphaned work directory " + p,
 			fix: func() error {
 				r.runTeardown(p)
 				return os.RemoveAll(p)

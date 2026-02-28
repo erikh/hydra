@@ -78,26 +78,18 @@ func (r *Runner) Review(taskName string) error {
 
 	// Checkout the task's branch (skip if working tree is dirty).
 	branch := task.BranchName()
-	if dirty, _ := taskRepo.HasChanges(); !dirty {
-		if !taskRepo.BranchExists(branch) {
-			if err := taskRepo.CreateBranch(branch); err != nil {
-				return fmt.Errorf("creating branch: %w", err)
-			}
-		} else {
-			if err := taskRepo.Checkout(branch); err != nil {
-				return fmt.Errorf("checking out branch: %w", err)
-			}
-		}
+	if err := r.ensureBranch(taskRepo, branch); err != nil {
+		return err
+	}
 
-		// Rebase onto latest remote main if requested.
-		if r.Rebase {
-			conflictFiles, err := r.attemptRebase(taskRepo)
-			if err != nil {
-				return fmt.Errorf("rebasing onto main: %w", err)
-			}
-			if len(conflictFiles) > 0 {
-				return fmt.Errorf("rebase conflicts — resolve manually before reviewing: %v", conflictFiles)
-			}
+	// Rebase onto latest remote main if requested (only if clean tree).
+	if dirty, _ := taskRepo.HasChanges(); r.Rebase && !dirty {
+		conflictFiles, err := r.attemptRebase(taskRepo)
+		if err != nil {
+			return fmt.Errorf("rebasing onto main: %w", err)
+		}
+		if len(conflictFiles) > 0 {
+			return fmt.Errorf("rebase conflicts — resolve manually before reviewing: %v", conflictFiles)
 		}
 	}
 

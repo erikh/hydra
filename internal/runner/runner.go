@@ -42,7 +42,7 @@ type Runner struct {
 	Model       string            // model name override
 	AutoAccept  bool              // auto-accept all tool calls
 	PlanMode    bool              // start Claude in plan mode
-	Rebase      bool               // rebase onto origin/main before running
+	Rebase      bool              // rebase onto origin/main before running
 	Notify      bool              // send desktop notifications on confirmation
 	IssueCloser issues.Closer     // set by merge workflow
 }
@@ -59,6 +59,7 @@ func New(cfg *config.Config) (*Runner, error) {
 		Design:  dd,
 		Claude:  invokeClaude,
 		BaseDir: ".",
+		Rebase:  true,
 	}
 
 	if err := r.loadHydraYml(cfg); err != nil {
@@ -225,24 +226,8 @@ func (r *Runner) Run(taskName string) error {
 	// Check out existing task branch, or create a new one.
 	// If the working tree is dirty, skip branch operations — let Claude work on it as-is.
 	branch := task.BranchName()
-	if dirty, _ := taskRepo.HasChanges(); !dirty {
-		if taskRepo.BranchExists(branch) {
-			if err := taskRepo.Checkout(branch); err != nil {
-				return fmt.Errorf("checking out branch: %w", err)
-			}
-		} else {
-			if err := taskRepo.CreateBranch(branch); err != nil {
-				return fmt.Errorf("creating branch: %w", err)
-			}
-		}
-	} else {
-		// Dirty tree — ensure we're at least on the right branch if possible.
-		if taskRepo.BranchExists(branch) {
-			currentBranch, _ := taskRepo.CurrentBranch()
-			if currentBranch != branch {
-				fmt.Fprintf(os.Stderr, "Warning: working tree is dirty and on %s, expected %s; letting Claude continue\n", currentBranch, branch)
-			}
-		}
+	if err := r.ensureBranch(taskRepo, branch); err != nil {
+		return err
 	}
 
 	// Read task content and assemble document
@@ -320,6 +305,28 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	fmt.Printf("Task %q completed successfully. Branch: %s\n", taskName, branch)
+	return nil
+}
+
+// ensureBranch checks out or creates the given branch. If the working tree
+// is dirty, it skips branch operations and warns if the current branch
+// doesn't match the expected one.
+func (r *Runner) ensureBranch(taskRepo *repo.Repo, branch string) error {
+	dirty, _ := taskRepo.HasChanges()
+	if !dirty {
+		if taskRepo.BranchExists(branch) {
+			return taskRepo.Checkout(branch)
+		}
+		return taskRepo.CreateBranch(branch)
+	}
+
+	// Dirty tree — warn if on the wrong branch.
+	if taskRepo.BranchExists(branch) {
+		currentBranch, _ := taskRepo.CurrentBranch()
+		if currentBranch != branch {
+			fmt.Fprintf(os.Stderr, "Warning: working tree is dirty and on %s, expected %s; letting Claude continue\n", currentBranch, branch)
+		}
+	}
 	return nil
 }
 

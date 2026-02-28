@@ -56,7 +56,10 @@ func (r *Runner) Verify() error {
 	// Assemble document.
 	cmds := r.commandsMap(wd)
 	functionalPath, _ := filepath.Abs(filepath.Join(r.Config.DesignDir, "functional.md"))
-	doc := assembleVerifyDocument(functional, functionalPath, cmds)
+	doc, err := r.assembleVerifyDocument(functional, functionalPath, cmds)
+	if err != nil {
+		return fmt.Errorf("assembling verify document: %w", err)
+	}
 
 	// Invoke Claude.
 	claudeFn := r.Claude
@@ -100,11 +103,32 @@ func (r *Runner) Verify() error {
 }
 
 // assembleVerifyDocument builds the prompt for the verify workflow.
-func assembleVerifyDocument(functional, functionalPath string, cmds map[string]string) string {
+func (r *Runner) assembleVerifyDocument(functional, functionalPath string, cmds map[string]string) (string, error) {
+	rules, err := r.Design.Rules()
+	if err != nil {
+		return "", err
+	}
+
+	lint, err := r.Design.Lint()
+	if err != nil {
+		return "", err
+	}
+
 	var b strings.Builder
 
 	b.WriteString("# Mission\n\nYour sole objective is to verify that every requirement in the functional specification " +
 		"below is satisfied by the current codebase.\n\n")
+
+	if rules != "" {
+		b.WriteString("# Rules\n\n")
+		b.WriteString(rules)
+		b.WriteString("\n\n")
+	}
+	if lint != "" {
+		b.WriteString("# Lint Rules\n\n")
+		b.WriteString(lint)
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString("# Functional Specification\n\n")
 	b.WriteString(functional)
@@ -144,5 +168,5 @@ func assembleVerifyDocument(functional, functionalPath string, cmds map[string]s
 		"` if the codebase has functionality not yet reflected in the specification. " +
 		"Create verify-passed.txt or verify-failed.txt.\n")
 
-	return b.String()
+	return b.String(), nil
 }

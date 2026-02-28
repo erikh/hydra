@@ -979,9 +979,9 @@ func reviewCommand() *cli.Command {
 						Usage: "Override the Claude model",
 					},
 					&cli.BoolFlag{
-						Name:    "rebase",
-						Aliases: []string{"r"},
-						Usage:   "Rebase onto origin/main before reviewing",
+						Name:    "no-rebase",
+						Aliases: []string{"R"},
+						Usage:   "Skip rebasing onto origin/main before reviewing",
 					},
 				},
 				Action: func(c *cli.Context) error {
@@ -1007,7 +1007,9 @@ func reviewCommand() *cli.Command {
 					if m := c.String("model"); m != "" {
 						r.Model = m
 					}
-					r.Rebase = c.Bool("rebase")
+					if c.Bool("no-rebase") {
+						r.Rebase = false
+					}
 					return r.Review(c.Args().Get(0))
 				},
 			},
@@ -1082,9 +1084,9 @@ func testCommand() *cli.Command {
 				Usage: "Override the Claude model",
 			},
 			&cli.BoolFlag{
-				Name:    "rebase",
-				Aliases: []string{"r"},
-				Usage:   "Rebase onto origin/main before testing",
+				Name:    "no-rebase",
+				Aliases: []string{"R"},
+				Usage:   "Skip rebasing onto origin/main before testing",
 			},
 		},
 		Action: func(c *cli.Context) error {
@@ -1112,7 +1114,9 @@ func testCommand() *cli.Command {
 			if m := c.String("model"); m != "" {
 				r.Model = m
 			}
-			r.Rebase = c.Bool("rebase")
+			if c.Bool("no-rebase") {
+				r.Rebase = false
+			}
 
 			return r.Test(c.Args().Get(0))
 		},
@@ -1159,55 +1163,69 @@ func mergeCommand() *cli.Command {
 	)
 }
 
+// autonomousFlags returns the common flags for autonomous commands (reconcile, verify).
+func autonomousFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.BoolFlag{
+			Name:    "no-auto-accept",
+			Aliases: []string{"Y"},
+			Usage:   "Disable auto-accept (prompt for each tool call)",
+		},
+		&cli.BoolFlag{
+			Name:    "no-plan",
+			Aliases: []string{"P"},
+			Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
+		},
+		&cli.BoolFlag{
+			Name:    "no-notify",
+			Aliases: []string{"N"},
+			Usage:   "Disable desktop notifications when confirmation is needed",
+		},
+		&cli.StringFlag{
+			Name:  "model",
+			Usage: "Override the Claude model",
+		},
+	}
+}
+
+// configureAutonomousRunner creates a runner and applies the autonomous flag defaults.
+func configureAutonomousRunner(c *cli.Context) (*runner.Runner, error) {
+	r, err := newRunner()
+	if err != nil {
+		return nil, err
+	}
+
+	r.AutoAccept = true
+	r.PlanMode = true
+	r.Notify = true
+	if c.Bool("no-auto-accept") {
+		r.AutoAccept = false
+	}
+	if c.Bool("no-plan") {
+		r.PlanMode = false
+	}
+	if c.Bool("no-notify") {
+		r.Notify = false
+	}
+	if m := c.String("model"); m != "" {
+		r.Model = m
+	}
+
+	return r, nil
+}
+
 func reconcileCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "reconcile",
 		Usage: "Merge completed tasks into functional.md and clean up",
 		Description: "Reads all completed task documents, uses Claude to synthesize " +
 			"their requirements into functional.md, then removes the completed task files.",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
-				Name:    "no-auto-accept",
-				Aliases: []string{"Y"},
-				Usage:   "Disable auto-accept (prompt for each tool call)",
-			},
-			&cli.BoolFlag{
-				Name:    "no-plan",
-				Aliases: []string{"P"},
-				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
-			},
-			&cli.BoolFlag{
-				Name:    "no-notify",
-				Aliases: []string{"N"},
-				Usage:   "Disable desktop notifications when confirmation is needed",
-			},
-			&cli.StringFlag{
-				Name:  "model",
-				Usage: "Override the Claude model",
-			},
-		},
+		Flags: autonomousFlags(),
 		Action: func(c *cli.Context) error {
-			r, err := newRunner()
+			r, err := configureAutonomousRunner(c)
 			if err != nil {
 				return err
 			}
-
-			r.AutoAccept = true
-			r.PlanMode = true
-			r.Notify = true
-			if c.Bool("no-auto-accept") {
-				r.AutoAccept = false
-			}
-			if c.Bool("no-plan") {
-				r.PlanMode = false
-			}
-			if c.Bool("no-notify") {
-				r.Notify = false
-			}
-			if m := c.String("model"); m != "" {
-				r.Model = m
-			}
-
 			return r.Reconcile()
 		},
 	}
@@ -1219,49 +1237,12 @@ func verifyCommand() *cli.Command {
 		Usage: "Verify all functional.md requirements against the codebase",
 		Description: "Uses Claude to check that every requirement in functional.md " +
 			"is implemented and tests pass on the current main branch.",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
-				Name:    "no-auto-accept",
-				Aliases: []string{"Y"},
-				Usage:   "Disable auto-accept (prompt for each tool call)",
-			},
-			&cli.BoolFlag{
-				Name:    "no-plan",
-				Aliases: []string{"P"},
-				Usage:   "Disable plan mode (skip plan approval, run fully autonomously)",
-			},
-			&cli.BoolFlag{
-				Name:    "no-notify",
-				Aliases: []string{"N"},
-				Usage:   "Disable desktop notifications when confirmation is needed",
-			},
-			&cli.StringFlag{
-				Name:  "model",
-				Usage: "Override the Claude model",
-			},
-		},
+		Flags: autonomousFlags(),
 		Action: func(c *cli.Context) error {
-			r, err := newRunner()
+			r, err := configureAutonomousRunner(c)
 			if err != nil {
 				return err
 			}
-
-			r.AutoAccept = true
-			r.PlanMode = true
-			r.Notify = true
-			if c.Bool("no-auto-accept") {
-				r.AutoAccept = false
-			}
-			if c.Bool("no-plan") {
-				r.PlanMode = false
-			}
-			if c.Bool("no-notify") {
-				r.Notify = false
-			}
-			if m := c.String("model"); m != "" {
-				r.Model = m
-			}
-
 			return r.Verify()
 		},
 	}
@@ -1553,10 +1534,10 @@ func milestoneListCommand() *cli.Command {
 				return nil
 			}
 
-			any := false
+			found := false
 
 			if len(milestones) > 0 {
-				any = true
+				found = true
 				fmt.Println("Outstanding:")
 				for _, m := range milestones {
 					fmt.Printf("  - %s\n", m.Date)
@@ -1570,7 +1551,7 @@ func milestoneListCommand() *cli.Command {
 			}
 
 			if len(delivered) > 0 {
-				any = true
+				found = true
 				fmt.Println("Delivered:")
 				for _, m := range delivered {
 					fmt.Printf("  - %s\n", m.Date)
@@ -1584,7 +1565,7 @@ func milestoneListCommand() *cli.Command {
 			}
 
 			if len(history) > 0 {
-				any = true
+				found = true
 				fmt.Println("History:")
 				for _, h := range history {
 					fmt.Printf("  - %s [%s]\n", h.Date, h.Score)
@@ -1592,7 +1573,7 @@ func milestoneListCommand() *cli.Command {
 				fmt.Println()
 			}
 
-			if !any {
+			if !found {
 				fmt.Println("No milestones found.")
 			}
 
