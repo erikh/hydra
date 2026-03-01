@@ -75,13 +75,13 @@ func (r *Runner) Test(taskName string) error {
 
 	// Append verification and commit instructions so Claude handles test/lint/staging/committing.
 	sign := taskRepo.HasSigningKey()
-	doc += verificationSection(cmds)
-	doc += commitInstructions(sign, cmds)
-	doc += timeoutSection(r.timeout())
-	if r.Notify {
-		doc += notificationSection(r.notifyTitle(taskName))
-	}
-	doc += missionReminder()
+	doc += documentSuffix(suffixOpts{
+		Commands:    cmds,
+		Sign:        sign,
+		Timeout:     r.timeout(),
+		Notify:      r.Notify,
+		NotifyTitle: r.notifyTitle(taskName),
+	})
 
 	// Run before hook.
 	if err := r.runBeforeHook(wd); err != nil {

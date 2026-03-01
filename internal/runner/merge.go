@@ -250,13 +250,14 @@ func (r *Runner) assembleMergeDocument(taskContent string, conflictFiles []strin
 	b.WriteString("Verify that every feature, behavior, or change described in the task document " +
 		"has corresponding test coverage. If any requirement lacks tests, add the missing tests.\n\n")
 
-	b.WriteString(verificationSection(cmds))
-	b.WriteString(commitInstructions(sign, cmds))
-	b.WriteString(timeoutSection(timeout))
-	if notify {
-		b.WriteString(notificationSection(notifyTitle))
-	}
-	b.WriteString(missionReminder())
+	b.WriteString(documentSuffix(suffixOpts{
+		Commands:    cmds,
+		Sign:        sign,
+		Timeout:     timeout,
+		Notify:      notify,
+		NotifyTitle: notifyTitle,
+		SkipSync:    true,
+	}))
 
 	return b.String(), nil
 }

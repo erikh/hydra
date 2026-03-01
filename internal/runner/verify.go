@@ -172,6 +172,7 @@ func (r *Runner) assembleVerifyDocument(functional string, sign bool, cmds map[s
 		"The specification is the source of truth — if code does not match the specification, fix the code.\n")
 
 	b.WriteString(commitInstructions(sign, cmds))
+	b.WriteString(rebaseAndPushSection(cmds))
 
 	b.WriteString("\n# Reminder\n\n")
 	b.WriteString("The functional specification is authoritative. Fix code to match it, never the reverse. " +

@@ -155,6 +155,63 @@ func timeoutSection(timeout time.Duration) string {
 		"and stop. A partial commit that builds and passes tests is better than no commit at all.\n", timeout)
 }
 
+// suffixOpts holds parameters for the common trailing document sections.
+type suffixOpts struct {
+	Commands    map[string]string
+	Sign        bool
+	Timeout     time.Duration
+	Notify      bool
+	NotifyTitle string
+	Reminder    string // custom reminder text; empty uses default missionReminder()
+	SkipSync    bool   // skip the rebase-and-push section (e.g. merge workflow handles git ops itself)
+}
+
+// documentSuffix returns the common trailing sections appended to every
+// workflow document: verification, commit, rebase-and-push, timeout,
+// notification, and mission reminder.
+func documentSuffix(opts suffixOpts) string {
+	var b strings.Builder
+	b.WriteString(verificationSection(opts.Commands))
+	b.WriteString(commitInstructions(opts.Sign, opts.Commands))
+	if !opts.SkipSync {
+		b.WriteString(rebaseAndPushSection(opts.Commands))
+	}
+	b.WriteString(timeoutSection(opts.Timeout))
+	if opts.Notify {
+		b.WriteString(notificationSection(opts.NotifyTitle))
+	}
+	if opts.Reminder != "" {
+		b.WriteString(opts.Reminder)
+	} else {
+		b.WriteString(missionReminder())
+	}
+	return b.String()
+}
+
+// rebaseAndPushSection returns a markdown section instructing Claude to
+// fetch, rebase, test, and loop until stable before pushing.
+func rebaseAndPushSection(commands map[string]string) string {
+	var b strings.Builder
+	b.WriteString("\n\n# Final Sync\n\n")
+	b.WriteString("After committing your changes, you must sync with origin before pushing. ")
+	b.WriteString("Repeat the following steps until no new changes arrive from origin and all tests pass:\n\n")
+	b.WriteString("1. Fetch origin: `git fetch origin`\n")
+	b.WriteString("2. Rebase against origin/main: `git rebase origin/main`\n")
+	b.WriteString("3. If the rebase produces conflicts, resolve them\n")
+
+	if testCmd, ok := commands["test"]; ok && testCmd != "" {
+		b.WriteString("4. Run the test suite: `" + testCmd + "`\n")
+	} else {
+		b.WriteString("4. Run the tests\n")
+	}
+
+	b.WriteString("5. Fix any failures and commit the fixes\n")
+	b.WriteString("6. Go back to step 1 and repeat until `git fetch` brings nothing new and all tests pass\n\n")
+	b.WriteString("Once stable, push the feature branch. Force push if needed.\n\n")
+	b.WriteString("Whenever the term \"rebase loop\" is used elsewhere in this document, it refers to this procedure.\n")
+	return b.String()
+}
+
 // stepPrefix returns a numbered step prefix like "1. ", "2. ", etc.
 func stepPrefix(n int) string {
 	return fmt.Sprintf("%d. ", n)
