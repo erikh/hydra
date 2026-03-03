@@ -4,6 +4,12 @@
 
 AI-driven local pull request workflow where Claude is the only contributor.
 
+### tmux Integration
+
+![tmux window list showing hydra tasks](tmux.png)
+
+Hydra sets the xterm title for every command it runs, so terminal multiplexers like tmux automatically display the current operation in the window list. This makes it easy to run many tasks in parallel and see at a glance what each one is doing. See [contrib/Makefile.tmux](contrib/Makefile.tmux) for a helper Makefile that spawns a tmux window per task.
+
 ## What is Hydra?
 
 You don't need a CI system, VM infrastructure, web interfaces, pull requests. You don't even need to push to do anything. You just need Claude.
