@@ -27,6 +27,7 @@ type ClaudeRunConfig struct {
 	Model      string
 	AutoAccept bool
 	PlanMode   bool
+	ForceTUI   bool
 }
 
 // ClaudeFunc is the function signature for invoking claude.
@@ -42,6 +43,7 @@ type Runner struct {
 	Model       string            // model name override
 	AutoAccept  bool              // auto-accept all tool calls
 	PlanMode    bool              // start Claude in plan mode
+	ForceTUI    bool              // force built-in TUI instead of Claude Code CLI
 	Rebase      bool              // rebase onto origin/main before running
 	Notify      bool              // send desktop notifications on confirmation
 	IssueCloser issues.Closer     // set by merge workflow
@@ -296,6 +298,7 @@ func (r *Runner) Run(taskName string) error {
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
+		ForceTUI:   r.ForceTUI,
 	}
 	if err := claudeFn(context.Background(), runCfg); err != nil {
 		return err

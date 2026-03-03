@@ -10,16 +10,18 @@ import (
 )
 
 func invokeClaude(ctx context.Context, cfg ClaudeRunConfig) error {
-	// Try Claude Code CLI first.
-	if cliPath := claude.FindCLI(); cliPath != "" {
-		return claude.RunCLI(ctx, claude.CLIConfig{
-			CLIPath:    cliPath,
-			Prompt:     cfg.Document,
-			Model:      modelOrDefault(cfg.Model),
-			WorkDir:    cfg.RepoDir,
-			AutoAccept: cfg.AutoAccept,
-			PlanMode:   cfg.PlanMode,
-		})
+	// Try Claude Code CLI first (unless forced to use the built-in TUI).
+	if !cfg.ForceTUI {
+		if cliPath := claude.FindCLI(); cliPath != "" {
+			return claude.RunCLI(ctx, claude.CLIConfig{
+				CLIPath:    cliPath,
+				Prompt:     cfg.Document,
+				Model:      modelOrDefault(cfg.Model),
+				WorkDir:    cfg.RepoDir,
+				AutoAccept: cfg.AutoAccept,
+				PlanMode:   cfg.PlanMode,
+			})
+		}
 	}
 
 	// Fall back to direct API + TUI.

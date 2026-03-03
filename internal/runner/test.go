@@ -105,6 +105,7 @@ func (r *Runner) Test(taskName string) error {
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
+		ForceTUI:   r.ForceTUI,
 	}
 	if err := claudeFn(context.Background(), runCfg); err != nil {
 		return err

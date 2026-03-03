@@ -119,6 +119,7 @@ func (r *Runner) Merge(taskName string) error {
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
+		ForceTUI:   r.ForceTUI,
 	}); err != nil {
 		return fmt.Errorf("claude failed: %w", err)
 	}

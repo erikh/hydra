@@ -317,6 +317,11 @@ func runCommand() *cli.Command {
 				Aliases: []string{"N"},
 				Usage:   "Disable desktop notifications when confirmation is needed",
 			},
+			&cli.BoolFlag{
+				Name:    "tui",
+				Aliases: []string{"T"},
+				Usage:   "Force the built-in TUI instead of Claude Code CLI",
+			},
 			&cli.StringFlag{
 				Name:  "model",
 				Usage: "Override the Claude model",
@@ -349,6 +354,7 @@ func runCommand() *cli.Command {
 			if c.Bool("no-notify") {
 				r.Notify = false
 			}
+			r.ForceTUI = c.Bool("tui")
 			if m := c.String("model"); m != "" {
 				r.Model = m
 			}
@@ -415,6 +421,11 @@ func groupCommand() *cli.Command {
 						Aliases: []string{"N"},
 						Usage:   "Disable desktop notifications when confirmation is needed",
 					},
+					&cli.BoolFlag{
+						Name:    "tui",
+						Aliases: []string{"T"},
+						Usage:   "Force the built-in TUI instead of Claude Code CLI",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -440,6 +451,7 @@ func groupCommand() *cli.Command {
 					if c.Bool("no-notify") {
 						r.Notify = false
 					}
+					r.ForceTUI = c.Bool("tui")
 					if m := c.String("model"); m != "" {
 						r.Model = m
 					}
@@ -470,6 +482,11 @@ func groupCommand() *cli.Command {
 						Aliases: []string{"N"},
 						Usage:   "Disable desktop notifications when confirmation is needed",
 					},
+					&cli.BoolFlag{
+						Name:    "tui",
+						Aliases: []string{"T"},
+						Usage:   "Force the built-in TUI instead of Claude Code CLI",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -495,6 +512,7 @@ func groupCommand() *cli.Command {
 					if c.Bool("no-notify") {
 						r.Notify = false
 					}
+					r.ForceTUI = c.Bool("tui")
 					if m := c.String("model"); m != "" {
 						r.Model = m
 					}
@@ -839,6 +857,11 @@ func stateCommand(name, usage, description, runUsage string, states []design.Tas
 						Aliases: []string{"N"},
 						Usage:   "Disable desktop notifications when confirmation is needed",
 					},
+					&cli.BoolFlag{
+						Name:    "tui",
+						Aliases: []string{"T"},
+						Usage:   "Force the built-in TUI instead of Claude Code CLI",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -864,6 +887,7 @@ func stateCommand(name, usage, description, runUsage string, states []design.Tas
 					if c.Bool("no-notify") {
 						r.Notify = false
 					}
+					r.ForceTUI = c.Bool("tui")
 					if m := c.String("model"); m != "" {
 						r.Model = m
 					}
@@ -974,6 +998,11 @@ func reviewCommand() *cli.Command {
 						Aliases: []string{"N"},
 						Usage:   "Disable desktop notifications when confirmation is needed",
 					},
+					&cli.BoolFlag{
+						Name:    "tui",
+						Aliases: []string{"T"},
+						Usage:   "Force the built-in TUI instead of Claude Code CLI",
+					},
 					&cli.StringFlag{
 						Name:  "model",
 						Usage: "Override the Claude model",
@@ -1004,6 +1033,7 @@ func reviewCommand() *cli.Command {
 					if c.Bool("no-notify") {
 						r.Notify = false
 					}
+					r.ForceTUI = c.Bool("tui")
 					if m := c.String("model"); m != "" {
 						r.Model = m
 					}
@@ -1079,6 +1109,11 @@ func testCommand() *cli.Command {
 				Aliases: []string{"N"},
 				Usage:   "Disable desktop notifications when confirmation is needed",
 			},
+			&cli.BoolFlag{
+				Name:    "tui",
+				Aliases: []string{"T"},
+				Usage:   "Force the built-in TUI instead of Claude Code CLI",
+			},
 			&cli.StringFlag{
 				Name:  "model",
 				Usage: "Override the Claude model",
@@ -1111,6 +1146,7 @@ func testCommand() *cli.Command {
 			if c.Bool("no-notify") {
 				r.Notify = false
 			}
+			r.ForceTUI = c.Bool("tui")
 			if m := c.String("model"); m != "" {
 				r.Model = m
 			}
@@ -1181,6 +1217,11 @@ func autonomousFlags() []cli.Flag {
 			Aliases: []string{"N"},
 			Usage:   "Disable desktop notifications when confirmation is needed",
 		},
+		&cli.BoolFlag{
+			Name:    "tui",
+			Aliases: []string{"T"},
+			Usage:   "Force the built-in TUI instead of Claude Code CLI",
+		},
 		&cli.StringFlag{
 			Name:  "model",
 			Usage: "Override the Claude model",
@@ -1207,6 +1248,7 @@ func configureAutonomousRunner(c *cli.Context) (*runner.Runner, error) {
 	if c.Bool("no-notify") {
 		r.Notify = false
 	}
+	r.ForceTUI = c.Bool("tui")
 	if m := c.String("model"); m != "" {
 		r.Model = m
 	}

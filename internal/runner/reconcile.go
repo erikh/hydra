@@ -99,6 +99,7 @@ func (r *Runner) Reconcile() error {
 		Model:      r.Model,
 		AutoAccept: r.AutoAccept,
 		PlanMode:   r.PlanMode,
+		ForceTUI:   r.ForceTUI,
 	})
 	if err != nil {
 		return fmt.Errorf("claude failed: %w", err)

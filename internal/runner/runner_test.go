@@ -1259,6 +1259,28 @@ func TestRunWithModelOverride(t *testing.T) {
 	}
 }
 
+func TestRunForceTUIPropagated(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var captured ClaudeRunConfig
+	r.Claude = mockClaudeCaptureConfig(&captured)
+	r.BaseDir = env.BaseDir
+	r.ForceTUI = true
+
+	if err := r.Run("add-feature"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !captured.ForceTUI {
+		t.Error("ForceTUI = false, want true")
+	}
+}
+
 func TestCommitInstructionsUnsigned(t *testing.T) {
 	result := commitInstructions(false, map[string]string{
 		"test": "go test ./...",
