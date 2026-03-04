@@ -157,6 +157,11 @@ func TestVerifyDocumentContents(t *testing.T) {
 	if lintIdx > funcIdx {
 		t.Error("lint section should appear before functional specification")
 	}
+
+	// Verify document ends with plan mode instruction.
+	if !strings.HasSuffix(strings.TrimRight(captured, "\n"), "Please enter plan mode immediately.") {
+		t.Error("document should end with plan mode instruction")
+	}
 }
 
 func TestVerifyClaudeFailure(t *testing.T) {
@@ -198,5 +203,76 @@ func TestVerifyNoResultFiles(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "did not produce") {
 		t.Errorf("error = %q, want 'did not produce' message", err)
+	}
+}
+
+func TestVerifyAlwaysFreshCheckout(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Pre-create the verify worktree and add a dirty file.
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "_verify")
+	if _, err := r.prepareRepo(wd, "hydra/_verify"); err != nil {
+		t.Fatalf("prepareRepo: %v", err)
+	}
+	writeFile(t, filepath.Join(wd, "stale-file.txt"), "stale content")
+
+	// Mock Claude to check the dirty file is gone.
+	var dirtyExists bool
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		_, err := os.Stat(filepath.Join(cfg.RepoDir, "stale-file.txt"))
+		dirtyExists = err == nil
+		return os.WriteFile(filepath.Join(cfg.RepoDir, "verify-passed.txt"), []byte("PASS"), 0o600)
+	}
+
+	if err := r.Verify(); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	if dirtyExists {
+		t.Error("stale file should be cleaned before Claude runs")
+	}
+}
+
+func TestVerifyRecoversFromMidRebase(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Pre-create the verify worktree.
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "_verify")
+	if _, err := r.prepareRepo(wd, "hydra/_verify"); err != nil {
+		t.Fatalf("prepareRepo: %v", err)
+	}
+
+	// Simulate mid-rebase state by creating the rebase-merge directory.
+	// .git in a worktree is a file pointing to the main repo's worktrees dir.
+	// We need to find the actual git dir.
+	gitDirData, err := os.ReadFile(filepath.Join(wd, ".git")) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("reading .git: %v", err)
+	}
+	gitDirLine := strings.TrimSpace(string(gitDirData))
+	gitDir := strings.TrimPrefix(gitDirLine, "gitdir: ")
+	rebaseMergeDir := filepath.Join(gitDir, "rebase-merge")
+	mkdirAll(t, rebaseMergeDir)
+	writeFile(t, filepath.Join(rebaseMergeDir, "head-name"), "refs/heads/hydra/_verify")
+
+	// Mock Claude — if we get here, recovery worked.
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		return os.WriteFile(filepath.Join(cfg.RepoDir, "verify-passed.txt"), []byte("PASS"), 0o600)
+	}
+
+	if err := r.Verify(); err != nil {
+		t.Fatalf("Verify should recover from mid-rebase, got: %v", err)
 	}
 }

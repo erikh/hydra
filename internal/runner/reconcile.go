@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/design"
 )
 
@@ -49,29 +50,22 @@ func (r *Runner) Reconcile() error {
 	}
 
 	// Prepare work directory.
-	wd := filepath.Join(baseDir, "work", "_reconcile")
-	reconcileRepo, err := r.prepareRepo(wd)
+	wd := filepath.Join(baseDir, config.HydraDir, "work", "_reconcile")
+	reconcileRepo, err := r.prepareRepo(wd, "hydra/_reconcile")
 	if err != nil {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
-	// Fetch and rebase against origin/main to ensure we reconcile against the latest code.
-	// Skip rebase if the working tree is dirty — let Claude work on it as-is.
+	// Fetch and reset to a clean state so Claude always works on the latest code.
 	if err := reconcileRepo.Fetch(); err != nil {
 		return fmt.Errorf("fetching origin: %w", err)
 	}
-	dirty, err := reconcileRepo.HasChanges()
+	defaultBranch, err := r.detectDefaultBranch(reconcileRepo)
 	if err != nil {
-		return fmt.Errorf("checking working tree: %w", err)
+		return fmt.Errorf("detecting default branch: %w", err)
 	}
-	if !dirty {
-		defaultBranch, err := r.detectDefaultBranch(reconcileRepo)
-		if err != nil {
-			return fmt.Errorf("detecting default branch: %w", err)
-		}
-		if err := reconcileRepo.Rebase("origin/" + defaultBranch); err != nil {
-			return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
-		}
+	if err := r.resetWorktree(reconcileRepo, "origin/"+defaultBranch); err != nil {
+		return fmt.Errorf("resetting work directory: %w", err)
 	}
 
 	// Copy current functional.md into the work directory for Claude to edit.
@@ -178,5 +172,6 @@ func assembleReconcileDocument(functional string, tasks []taskEntry) string {
 	b.WriteString("\n# Reminder\n\n")
 	b.WriteString("Your ONLY job is to update functional.md. Do not make any other changes.\n")
 
+	b.WriteString(planModeInstruction)
 	return b.String()
 }

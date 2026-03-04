@@ -51,7 +51,7 @@ type Runner struct {
 
 // New creates a Runner from the given config.
 func New(cfg *config.Config) (*Runner, error) {
-	dd, err := design.NewDir(cfg.DesignDir)
+	dd, err := design.NewDir(cfg.DesignDir())
 	if err != nil {
 		return nil, err
 	}
@@ -74,10 +74,10 @@ func New(cfg *config.Config) (*Runner, error) {
 // loadHydraYml loads hydra.yml and resolves issue closer.
 // If the file does not exist, it is created with placeholder content.
 func (r *Runner) loadHydraYml(cfg *config.Config) error {
-	if err := design.EnsureHydraYml(cfg.DesignDir); err != nil {
+	if err := design.EnsureHydraYml(cfg.DesignDir()); err != nil {
 		return fmt.Errorf("ensuring hydra.yml: %w", err)
 	}
-	ymlPath := filepath.Join(cfg.DesignDir, "hydra.yml")
+	ymlPath := filepath.Join(cfg.DesignDir(), "hydra.yml")
 
 	cmds, err := taskrun.Load(ymlPath)
 	if err != nil {
@@ -145,30 +145,54 @@ func (r *Runner) runBeforeHook(workDir string) error {
 }
 
 // workDir returns the work directory path for a task.
-// Ungrouped tasks: work/{name}, grouped tasks: work/{group}/{name}.
+// Ungrouped tasks: .hydra/work/{name}, grouped tasks: .hydra/work/{group}/{name}.
 func (r *Runner) workDir(task *design.Task) string {
 	baseDir := r.BaseDir
 	if baseDir == "" {
 		baseDir = "."
 	}
 	if task.Group != "" {
-		return filepath.Join(baseDir, "work", task.Group, task.Name)
+		return filepath.Join(baseDir, config.HydraDir, "work", task.Group, task.Name)
 	}
-	return filepath.Join(baseDir, "work", task.Name)
+	return filepath.Join(baseDir, config.HydraDir, "work", task.Name)
 }
 
-// prepareRepo sets up the work directory for a task.
-// If the directory exists and is a valid git repo, it fetches and resets.
-// Otherwise, it clones fresh from the source repo URL.
-func (r *Runner) prepareRepo(workDir string) (*repo.Repo, error) {
+// prepareRepo sets up the work directory for a task using git worktrees.
+// If the directory exists and is a valid git repo (worktree), it fetches.
+// Otherwise, it creates a new worktree from the main repo.
+// The branchName parameter is used when creating a new worktree.
+func (r *Runner) prepareRepo(workDir, branchName string) (*repo.Repo, error) {
 	if taskRepo, ok := r.trySyncExisting(workDir); ok {
 		return taskRepo, nil
 	}
-	return repo.Clone(r.Config.SourceRepoURL, workDir)
+
+	// Create parent directories for the worktree.
+	if err := os.MkdirAll(filepath.Dir(workDir), 0o750); err != nil {
+		return nil, fmt.Errorf("creating work dir parent: %w", err)
+	}
+
+	// Open the main repo and create a worktree.
+	mainRepo := repo.Open(r.Config.BaseDir)
+	if err := mainRepo.Fetch(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: fetch failed: %v\n", err)
+	}
+
+	// Check if the branch already exists (local or remote).
+	if mainRepo.BranchExists(branchName) {
+		if err := mainRepo.WorktreeAddExisting(workDir, branchName); err != nil {
+			return nil, fmt.Errorf("creating worktree for existing branch: %w", err)
+		}
+	} else {
+		if err := mainRepo.WorktreeAdd(workDir, branchName); err != nil {
+			return nil, fmt.Errorf("creating worktree: %w", err)
+		}
+	}
+
+	return repo.Open(workDir), nil
 }
 
 // trySyncExisting attempts to sync an existing work directory.
-// Returns the repo and true if successful, or nil and false if a fresh clone is needed.
+// Returns the repo and true if successful, or nil and false if a fresh worktree is needed.
 func (r *Runner) trySyncExisting(workDir string) (*repo.Repo, bool) {
 	info, err := os.Stat(workDir)
 	if err != nil || !info.IsDir() {
@@ -179,13 +203,18 @@ func (r *Runner) trySyncExisting(workDir string) (*repo.Repo, bool) {
 		if taskRepo, err := r.syncGitRepo(workDir); err == nil {
 			return taskRepo, true
 		}
-		fmt.Fprintf(os.Stderr, "Warning: resync of %s failed, re-cloning\n", workDir)
+		fmt.Fprintf(os.Stderr, "Warning: resync of %s failed, re-creating worktree\n", workDir)
 	}
 
 	// Not a git repo or sync failed; teardown and remove it.
 	r.runTeardown(workDir)
-	if err := os.RemoveAll(workDir); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", workDir, err)
+	// Try to remove the worktree cleanly first.
+	mainRepo := repo.Open(r.Config.BaseDir)
+	if err := mainRepo.WorktreeRemove(workDir); err != nil {
+		// Fall back to direct removal.
+		if rmErr := os.RemoveAll(workDir); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", workDir, rmErr)
+		}
 	}
 	return nil, false
 }
@@ -197,6 +226,19 @@ func (r *Runner) syncGitRepo(workDir string) (*repo.Repo, error) {
 		return nil, err
 	}
 	return taskRepo, nil
+}
+
+// resetWorktree forces a worktree to a clean state on the given remote ref.
+// It aborts any in-progress rebase, hard-resets to the ref, and removes untracked files.
+func (r *Runner) resetWorktree(taskRepo *repo.Repo, remoteRef string) error {
+	_ = taskRepo.RebaseAbort() // safe no-op if not mid-rebase
+	if err := taskRepo.ResetHard(remoteRef); err != nil {
+		return fmt.Errorf("resetting to %s: %w", remoteRef, err)
+	}
+	if err := taskRepo.Clean(); err != nil {
+		return fmt.Errorf("cleaning working tree: %w", err)
+	}
+	return nil
 }
 
 // Run executes the full task lifecycle: lock, branch, assemble, claude, test, lint, commit, push, record, move to review.
@@ -222,14 +264,14 @@ func (r *Runner) Run(taskName string) error {
 
 	// Prepare work directory
 	wd := r.workDir(task)
-	taskRepo, err := r.prepareRepo(wd)
+	branch := task.BranchName()
+	taskRepo, err := r.prepareRepo(wd, branch)
 	if err != nil {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
 	// Check out existing task branch, or create a new one.
 	// If the working tree is dirty, skip branch operations — let Claude work on it as-is.
-	branch := task.BranchName()
 	if err := r.ensureBranch(taskRepo, branch); err != nil {
 		return err
 	}
@@ -314,7 +356,7 @@ func (r *Runner) Run(taskName string) error {
 	}
 
 	// Record SHA -> task name
-	record := design.NewRecord(r.Config.DesignDir)
+	record := design.NewRecord(r.Config.DesignDir())
 	if err := record.Add(afterSHA, taskName); err != nil {
 		return fmt.Errorf("recording SHA: %w", err)
 	}
@@ -332,32 +374,31 @@ func (r *Runner) Run(taskName string) error {
 	return nil
 }
 
-// ensureBranch checks out or creates the given branch. If the working tree
-// is dirty, it skips branch operations and warns if the current branch
-// doesn't match the expected one.
+// ensureBranch verifies the worktree is on the correct branch. If the
+// working tree is dirty, it warns but continues. If the branch needs
+// to be checked out (e.g., worktree was reused), it checks it out.
 func (r *Runner) ensureBranch(taskRepo *repo.Repo, branch string) error {
+	currentBranch, err := taskRepo.CurrentBranch()
+	if err != nil {
+		return fmt.Errorf("getting current branch: %w", err)
+	}
+	if currentBranch == branch {
+		return nil
+	}
+
 	dirty, err := taskRepo.HasChanges()
 	if err != nil {
 		return fmt.Errorf("checking working tree: %w", err)
 	}
-	if !dirty {
-		if taskRepo.BranchExists(branch) {
-			return taskRepo.Checkout(branch)
-		}
-		return taskRepo.CreateBranch(branch)
+	if dirty {
+		fmt.Fprintf(os.Stderr, "Warning: working tree is dirty and on %s, expected %s; letting Claude continue\n", currentBranch, branch)
+		return nil
 	}
 
-	// Dirty tree — warn if on the wrong branch.
 	if taskRepo.BranchExists(branch) {
-		currentBranch, err := taskRepo.CurrentBranch()
-		if err != nil {
-			return fmt.Errorf("getting current branch: %w", err)
-		}
-		if currentBranch != branch {
-			fmt.Fprintf(os.Stderr, "Warning: working tree is dirty and on %s, expected %s; letting Claude continue\n", currentBranch, branch)
-		}
+		return taskRepo.Checkout(branch)
 	}
-	return nil
+	return taskRepo.CreateBranch(branch)
 }
 
 // listReviewMergeTasks prints tasks in both review and merge states,
@@ -471,14 +512,14 @@ func (r *Runner) Sync(labels []string) error {
 		return err
 	}
 
-	created, skipped, err := issues.Sync(context.Background(), r.Config.DesignDir, source, labels)
+	created, skipped, err := issues.Sync(context.Background(), r.Config.DesignDir(), source, labels)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Synced issues: %d created, %d skipped\n", created, skipped)
 
-	sourceRepo := repo.Open(r.Config.RepoDir)
+	sourceRepo := repo.Open(r.Config.BaseDir)
 	closer := issues.ResolveCloser(source)
 
 	cleanup, err := issues.Cleanup(r.Design, sourceRepo, closer)

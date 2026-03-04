@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erikh/hydra/internal/config"
 	"github.com/erikh/hydra/internal/repo"
 )
 
@@ -29,29 +30,22 @@ func (r *Runner) Verify() error {
 	}
 
 	// Prepare work directory.
-	wd := filepath.Join(baseDir, "work", "_verify")
-	verifyRepo, err := r.prepareRepo(wd)
+	wd := filepath.Join(baseDir, config.HydraDir, "work", "_verify")
+	verifyRepo, err := r.prepareRepo(wd, "hydra/_verify")
 	if err != nil {
 		return fmt.Errorf("preparing work directory: %w", err)
 	}
 
-	// Fetch and rebase against origin/main to ensure we verify the latest code.
-	// Skip rebase if the working tree is dirty — let Claude work on it as-is.
+	// Fetch and reset to a clean state so Claude always verifies the latest code.
 	if err := verifyRepo.Fetch(); err != nil {
 		return fmt.Errorf("fetching origin: %w", err)
 	}
-	dirty, err := verifyRepo.HasChanges()
+	defaultBranch, err := r.detectDefaultBranch(verifyRepo)
 	if err != nil {
-		return fmt.Errorf("checking working tree: %w", err)
+		return fmt.Errorf("detecting default branch: %w", err)
 	}
-	if !dirty {
-		defaultBranch, err := r.detectDefaultBranch(verifyRepo)
-		if err != nil {
-			return fmt.Errorf("detecting default branch: %w", err)
-		}
-		if err := verifyRepo.Rebase("origin/" + defaultBranch); err != nil {
-			return fmt.Errorf("rebasing against origin/%s: %w", defaultBranch, err)
-		}
+	if err := r.resetWorktree(verifyRepo, "origin/"+defaultBranch); err != nil {
+		return fmt.Errorf("resetting work directory: %w", err)
 	}
 
 	// Run before hook.
@@ -179,6 +173,7 @@ func (r *Runner) assembleVerifyDocument(functional string, sign bool, cmds map[s
 	b.WriteString("The functional specification is authoritative. Fix code to match it, never the reverse. " +
 		"Commit your changes, then create verify-passed.txt or verify-failed.txt when done.\n")
 
+	b.WriteString(planModeInstruction)
 	return b.String(), nil
 }
 

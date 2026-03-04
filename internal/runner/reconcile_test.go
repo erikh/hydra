@@ -136,6 +136,11 @@ func TestReconcileDocumentContents(t *testing.T) {
 	if !strings.Contains(captured, "ground truth") {
 		t.Error("document missing ground truth language")
 	}
+
+	// Verify document ends with plan mode instruction.
+	if !strings.HasSuffix(strings.TrimRight(captured, "\n"), "Please enter plan mode immediately.") {
+		t.Error("document should end with plan mode instruction")
+	}
 }
 
 func TestReconcilePreservesOtherStates(t *testing.T) {
@@ -207,5 +212,43 @@ func TestReconcileClaudeFailure(t *testing.T) {
 	currentFunctional, _ := os.ReadFile(filepath.Join(env.DesignDir, "functional.md"))
 	if string(currentFunctional) != string(origFunctional) {
 		t.Error("functional.md should not be modified on Claude failure")
+	}
+}
+
+func TestReconcileAlwaysFreshCheckout(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Set up completed tasks.
+	mkdirAll(t, filepath.Join(env.DesignDir, "state", "completed"))
+	writeFile(t, filepath.Join(env.DesignDir, "state", "completed", "done-task.md"), "Done task content")
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Pre-create the reconcile worktree and add a dirty file.
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "_reconcile")
+	if _, err := r.prepareRepo(wd, "hydra/_reconcile"); err != nil {
+		t.Fatalf("prepareRepo: %v", err)
+	}
+	dirtyPath := filepath.Join(wd, "stale-file.txt")
+	writeFile(t, dirtyPath, "stale content")
+
+	// Mock Claude to check the dirty file is gone.
+	var dirtyExists bool
+	r.Claude = func(_ context.Context, cfg ClaudeRunConfig) error {
+		_, err := os.Stat(filepath.Join(cfg.RepoDir, "stale-file.txt"))
+		dirtyExists = err == nil
+		return nil
+	}
+
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if dirtyExists {
+		t.Error("stale file should be cleaned before Claude runs")
 	}
 }

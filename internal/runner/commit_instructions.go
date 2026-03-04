@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// planModeInstruction is appended to every workflow document so Claude starts in plan mode.
+const planModeInstruction = "\nPlease enter plan mode immediately.\n"
+
 // conflictResolutionSection returns a markdown section instructing Claude to
 // resolve rebase conflicts. Returns empty string if there are no conflicts.
 func conflictResolutionSection(conflictFiles []string) string {
@@ -185,6 +188,7 @@ func documentSuffix(opts suffixOpts) string {
 	} else {
 		b.WriteString(missionReminder())
 	}
+	b.WriteString(planModeInstruction)
 	return b.String()
 }
 

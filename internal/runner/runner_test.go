@@ -32,11 +32,28 @@ func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 
 	base := t.TempDir()
-	designDir := filepath.Join(t.TempDir(), "design")
 
-	if err := os.MkdirAll(designDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
+	// Initialize git repo in base so worktrees and repo.Open work.
+	gitRun(t, "init", base)
+	gitRun(t, "-C", base, "config", "user.email", "test@test.com")
+	gitRun(t, "-C", base, "config", "user.name", "Test")
+	gitRun(t, "-C", base, "config", "commit.gpgsign", "false")
+	writeFile(t, filepath.Join(base, "README.md"), "# Test")
+	gitRun(t, "-C", base, "add", "-A")
+	gitRun(t, "-C", base, "commit", "-m", "initial")
+
+	// Create bare remote from the base repo.
+	bareDir := filepath.Join(t.TempDir(), "remote.git")
+	gitRun(t, "clone", "--bare", base, bareDir)
+
+	// Add bare as origin remote.
+	gitRun(t, "-C", base, "remote", "add", "origin", bareDir)
+	gitRun(t, "-C", base, "push", "-u", "origin", "main")
+
+	// Create .hydra dir, design dir, and work dir.
+	designDir := filepath.Join(base, ".hydra", "design")
+	mkdirAll(t, designDir)
+	mkdirAll(t, filepath.Join(base, ".hydra", "work"))
 
 	// Create design files.
 	writeFile(t, filepath.Join(designDir, "rules.md"), "Follow best practices.")
@@ -58,29 +75,9 @@ func setupTestEnv(t *testing.T) *testEnv {
 	// Create state dir for record.json.
 	mkdirAll(t, filepath.Join(designDir, "state"))
 
-	// Create bare remote with an initial commit so clones have content.
-	bareDir := filepath.Join(t.TempDir(), "remote.git")
-	setupDir := filepath.Join(t.TempDir(), "setup-repo")
-	mkdirAll(t, setupDir)
-	gitRun(t, "init", setupDir)
-	gitRun(t, "-C", setupDir, "config", "user.email", "test@test.com")
-	gitRun(t, "-C", setupDir, "config", "user.name", "Test")
-	gitRun(t, "-C", setupDir, "config", "commit.gpgsign", "false")
-	writeFile(t, filepath.Join(setupDir, "README.md"), "# Test")
-	gitRun(t, "-C", setupDir, "add", "-A")
-	gitRun(t, "-C", setupDir, "commit", "-m", "initial")
-
-	// Create bare clone from the setup repo.
-	gitRun(t, "clone", "--bare", setupDir, bareDir)
-
-	// Create .hydra dir and config.
-	hydraDir := filepath.Join(base, ".hydra")
-	mkdirAll(t, hydraDir)
-
 	cfg := &config.Config{
 		SourceRepoURL: bareDir,
-		DesignDir:     designDir,
-		RepoDir:       filepath.Join(base, "repo"), // kept for compatibility but unused by runner
+		BaseDir:       base,
 	}
 	if err := cfg.Save(base); err != nil {
 		t.Fatal(err)
@@ -192,7 +189,7 @@ func mockClaudeCaptureConfig(captured *ClaudeRunConfig) ClaudeFunc {
 
 // workDirForTask returns the expected work directory for "add-feature" in tests.
 func workDirForTask(baseDir string) string {
-	return filepath.Join(baseDir, "work", "add-feature")
+	return filepath.Join(baseDir, ".hydra", "work", "add-feature")
 }
 
 func TestRunFullWorkflow(t *testing.T) {
@@ -303,7 +300,7 @@ func TestRunGroupedTask(t *testing.T) {
 	}
 
 	// Grouped tasks go in work/{group}/{name}.
-	wd := filepath.Join(env.BaseDir, "work", "backend", "add-api")
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "backend", "add-api")
 	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git rev-parse: %v", err)
@@ -329,7 +326,7 @@ func TestRunGroupedTaskWorkDir(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	wd := filepath.Join(env.BaseDir, "work", "backend", "add-api")
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "backend", "add-api")
 	if _, err := os.Stat(wd); err != nil {
 		t.Errorf("grouped work dir not created: %v", err)
 	}
@@ -656,6 +653,11 @@ func TestRunDocumentIncludesCommitInstructions(t *testing.T) {
 	if !strings.Contains(captured, "git commit") {
 		t.Error("document missing git commit instruction")
 	}
+
+	// Verify document ends with plan mode instruction.
+	if !strings.HasSuffix(strings.TrimRight(captured, "\n"), "Please enter plan mode immediately.") {
+		t.Error("document should end with plan mode instruction")
+	}
 }
 
 func TestRunRecordsSHA(t *testing.T) {
@@ -859,8 +861,8 @@ func TestPrepareRepoFreshClone(t *testing.T) {
 	}
 	r.BaseDir = env.BaseDir
 
-	wd := filepath.Join(env.BaseDir, "work", "fresh-task")
-	taskRepo, err := r.prepareRepo(wd)
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "fresh-task")
+	taskRepo, err := r.prepareRepo(wd, "hydra/fresh-task")
 	if err != nil {
 		t.Fatalf("prepareRepo: %v", err)
 	}
@@ -878,10 +880,10 @@ func TestPrepareRepoExistingGitDir(t *testing.T) {
 	}
 	r.BaseDir = env.BaseDir
 
-	wd := filepath.Join(env.BaseDir, "work", "existing-task")
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "existing-task")
 
-	// First clone.
-	_, err = r.prepareRepo(wd)
+	// First worktree creation.
+	_, err = r.prepareRepo(wd, "hydra/existing-task")
 	if err != nil {
 		t.Fatalf("first prepareRepo: %v", err)
 	}
@@ -890,7 +892,7 @@ func TestPrepareRepoExistingGitDir(t *testing.T) {
 	writeFile(t, filepath.Join(wd, "dirty.txt"), "dirty")
 
 	// Second prepare should fetch without resetting the working tree.
-	taskRepo, err := r.prepareRepo(wd)
+	taskRepo, err := r.prepareRepo(wd, "hydra/existing-task")
 	if err != nil {
 		t.Fatalf("second prepareRepo: %v", err)
 	}
@@ -913,11 +915,11 @@ func TestPrepareRepoNotGitDir(t *testing.T) {
 	}
 	r.BaseDir = env.BaseDir
 
-	wd := filepath.Join(env.BaseDir, "work", "not-git")
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "not-git")
 	mkdirAll(t, wd)
 	writeFile(t, filepath.Join(wd, "random.txt"), "not a git repo")
 
-	taskRepo, err := r.prepareRepo(wd)
+	taskRepo, err := r.prepareRepo(wd, "hydra/not-git")
 	if err != nil {
 		t.Fatalf("prepareRepo: %v", err)
 	}
@@ -951,8 +953,8 @@ func TestRunGroupNoBaseBranch(t *testing.T) {
 	}
 
 	// Each task should have its own work dir.
-	apiWD := filepath.Join(env.BaseDir, "work", "backend", "add-api")
-	dbWD := filepath.Join(env.BaseDir, "work", "backend", "add-db")
+	apiWD := filepath.Join(env.BaseDir, ".hydra", "work", "backend", "add-api")
+	dbWD := filepath.Join(env.BaseDir, ".hydra", "work", "backend", "add-db")
 
 	if _, err := os.Stat(apiWD); err != nil {
 		t.Error("add-api work dir not created")
@@ -1160,19 +1162,13 @@ func TestMergeUsesRebase(t *testing.T) {
 	}
 
 	// Verify main was updated via rebase (no merge commits).
-	wd := workDirForTask(env.BaseDir)
-	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "log", "--oneline", "--merges", "main").Output() //nolint:gosec // test
+	// After merge, the worktree is removed, so check the main repo.
+	out, err := exec.CommandContext(context.Background(), "git", "-C", env.BaseDir, "log", "--oneline", "--merges", "main").Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
 	if strings.TrimSpace(string(out)) != "" {
 		t.Errorf("expected no merge commits on main, got: %s", out)
-	}
-
-	// Verify the task branch commit is an ancestor of main.
-	err = exec.CommandContext(context.Background(), "git", "-C", wd, "merge-base", "--is-ancestor", testBranchAddFeature, "main").Run() //nolint:gosec // test
-	if err != nil {
-		t.Error("task branch should be an ancestor of main after rebase")
 	}
 }
 
@@ -2952,7 +2948,7 @@ func TestMergeDocumentNoRebaseLoop(t *testing.T) {
 
 func TestMergeWorkflowBranchOnMain(t *testing.T) {
 	// After merge, main should contain the feature branch commits
-	// and the work directory should end on main.
+	// and the main repo should be on main.
 	env := setupTestEnv(t)
 
 	r, err := New(env.Config)
@@ -2973,15 +2969,14 @@ func TestMergeWorkflowBranchOnMain(t *testing.T) {
 		t.Fatalf("Merge: %v", err)
 	}
 
-	// Verify current branch in work dir is main after merge.
-	wd := workDirForTask(env.BaseDir)
-	out, err := exec.CommandContext(context.Background(), "git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
+	// After merge, the worktree is removed. Verify main repo is on main.
+	out, err := exec.CommandContext(context.Background(), "git", "-C", env.BaseDir, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:gosec // test
 	if err != nil {
 		t.Fatalf("git rev-parse: %v", err)
 	}
 	branch := strings.TrimSpace(string(out))
 	if branch != "main" {
-		t.Errorf("expected work dir to be on main after merge, got %q", branch)
+		t.Errorf("expected main repo to be on main after merge, got %q", branch)
 	}
 }
 
@@ -3045,9 +3040,8 @@ func TestMergeMainRebasedAgainstOrigin(t *testing.T) {
 		t.Fatalf("Merge: %v", err)
 	}
 
-	// Verify origin/main is an ancestor of local main.
-	wd := workDirForTask(env.BaseDir)
-	err = exec.CommandContext(context.Background(), "git", "-C", wd, "merge-base", "--is-ancestor", "origin/main", "main").Run() //nolint:gosec // test
+	// After merge, the worktree is removed. Check the main repo.
+	err = exec.CommandContext(context.Background(), "git", "-C", env.BaseDir, "merge-base", "--is-ancestor", "origin/main", "main").Run() //nolint:gosec // test
 	if err != nil {
 		t.Error("origin/main should be an ancestor of local main after merge")
 	}
@@ -3243,7 +3237,7 @@ func TestFixOrphanedWorkDirsRemoved(t *testing.T) {
 	r.BaseDir = env.BaseDir
 
 	// Create an orphaned work directory (no corresponding task).
-	orphanDir := filepath.Join(env.BaseDir, "work", "nonexistent-task")
+	orphanDir := filepath.Join(env.BaseDir, ".hydra", "work", "nonexistent-task")
 	if err := os.MkdirAll(orphanDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -3269,7 +3263,7 @@ func TestFixOrphanedGroupWorkDirsRemoved(t *testing.T) {
 	r.BaseDir = env.BaseDir
 
 	// Create an orphaned grouped work directory.
-	groupDir := filepath.Join(env.BaseDir, "work", "backend")
+	groupDir := filepath.Join(env.BaseDir, ".hydra", "work", "backend")
 	orphanDir := filepath.Join(groupDir, "nonexistent-task")
 	if err := os.MkdirAll(orphanDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -3294,7 +3288,7 @@ func TestFixNoAutoConfirmDoesNotApply(t *testing.T) {
 	r.BaseDir = env.BaseDir
 
 	// Create an orphaned work directory.
-	orphanDir := filepath.Join(env.BaseDir, "work", "nonexistent-task")
+	orphanDir := filepath.Join(env.BaseDir, ".hydra", "work", "nonexistent-task")
 	if err := os.MkdirAll(orphanDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -3922,5 +3916,83 @@ func TestTestPassesConflictsToClaude(t *testing.T) {
 	}
 	if !strings.Contains(captured, "README.md") {
 		t.Error("Test document should list README.md as conflicted file")
+	}
+}
+
+func TestDocumentSuffixEndsPlanMode(t *testing.T) {
+	doc := documentSuffix(suffixOpts{
+		Commands: map[string]string{"test": "go test ./..."},
+		Sign:     false,
+	})
+	if !strings.HasSuffix(strings.TrimRight(doc, "\n"), "Please enter plan mode immediately.") {
+		t.Error("documentSuffix should end with plan mode instruction")
+	}
+}
+
+func TestAssembleReconcileDocumentEndsPlanMode(t *testing.T) {
+	doc := assembleReconcileDocument("spec content", []taskEntry{{name: "t1", content: "task content"}})
+	if !strings.HasSuffix(strings.TrimRight(doc, "\n"), "Please enter plan mode immediately.") {
+		t.Error("assembleReconcileDocument should end with plan mode instruction")
+	}
+}
+
+func TestAssembleVerifyDocumentEndsPlanMode(t *testing.T) {
+	r := stubRunner(t)
+	doc, err := r.assembleVerifyDocument("spec content", false, map[string]string{"test": "go test ./..."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(strings.TrimRight(doc, "\n"), "Please enter plan mode immediately.") {
+		t.Error("assembleVerifyDocument should end with plan mode instruction")
+	}
+}
+
+func TestResetWorktree(t *testing.T) {
+	env := setupTestEnv(t)
+
+	r, err := New(env.Config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.BaseDir = env.BaseDir
+
+	// Create a worktree to test against.
+	wd := filepath.Join(env.BaseDir, ".hydra", "work", "_test-reset")
+	taskRepo, err := r.prepareRepo(wd, "hydra/_test-reset")
+	if err != nil {
+		t.Fatalf("prepareRepo: %v", err)
+	}
+
+	// Create an untracked file (dirty state).
+	writeFile(t, filepath.Join(wd, "dirty.txt"), "dirty content")
+
+	// Create a tracked modified file.
+	writeFile(t, filepath.Join(wd, "README.md"), "modified content")
+
+	if err := r.resetWorktree(taskRepo, "origin/main"); err != nil {
+		t.Fatalf("resetWorktree: %v", err)
+	}
+
+	// Untracked file should be gone.
+	if _, err := os.Stat(filepath.Join(wd, "dirty.txt")); !os.IsNotExist(err) {
+		t.Error("untracked file should be removed after resetWorktree")
+	}
+
+	// Modified file should be restored.
+	data, err := os.ReadFile(filepath.Join(wd, "README.md")) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "# Test" {
+		t.Errorf("README.md should be restored to original, got: %s", data)
+	}
+
+	// Working tree should be clean.
+	dirty, err := taskRepo.HasChanges()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirty {
+		t.Error("working tree should be clean after resetWorktree")
 	}
 }
